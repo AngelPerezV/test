@@ -481,3 +481,33 @@ class bnmxspark():
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
 
+import ast
+import os
+
+def buscar_iteritems_en_archivo(path):
+    with open(path, "r", encoding="utf-8") as file:
+        tree = ast.parse(file.read(), filename=path)
+
+    errores = []
+
+    class IteritemsVisitor(ast.NodeVisitor):
+        def visit_Attribute(self, node):
+            if node.attr == "iteritems":
+                errores.append((node.lineno, node.col_offset))
+            self.generic_visit(node)
+
+    IteritemsVisitor().visit(tree)
+
+    return errores
+
+# Ruta al archivo que quieres analizar
+archivo_a_revisar = "src/mod/bnmxspark.py"
+
+errores = buscar_iteritems_en_archivo(archivo_a_revisar)
+
+if errores:
+    print(f"Se encontraron usos de `.iteritems()` en {archivo_a_revisar}:")
+    for lineno, col in errores:
+        print(f"  - Línea {lineno}, columna {col}")
+else:
+    print("¡Perfecto! No se encontró ninguna referencia a `.iteritems()` en el archivo.")
