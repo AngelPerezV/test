@@ -343,3 +343,35 @@ class bnmxspark():
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
 
+    def insumos_validate(self, msg_notif: str = ""):
+            """
+                Valida el estado de los archivos cargados y envía notificación por correo si hay errores.
+
+                Args:
+                msg_notif (str): Mensaje adicional para incluir en la notificación.
+
+                Returns:
+                None
+                """
+    self.write_log("Validando archivos de insumo.")
+
+    errores = len(self.details_df[self.details_df["status"].str.contains("Error", na=False)])
+    tipo_unsupported = len(self.details_df[self.details_df["status"].str.contains("unsupported file type", na=False)])
+
+    if errores > 0 or tipo_unsupported > 0:
+        status = "Phase Pre-Execution: Warning"
+        self.write_log(f"Errores detectados en archivos de insumo: {errores + tipo_unsupported}", "WARNING")
+        self.spark.stop()
+    else:
+        status = "Phase Pre-Execution: Completed"
+        self.write_log("Archivos de insumo validados correctamente.")
+
+    bpa_email.email_insumos_validate(
+        process_name=config.ProcessName,
+        msg=msg_notif,
+        df=self.details_df,
+        logfile=self.LogFile,
+        status=status
+    )
+
+    self.write_log("Correo de validación de insumos enviado.")
