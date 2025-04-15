@@ -230,3 +230,19 @@ class bnmxspark:
             error_msg = f"Error inesperado en DLakeReplace: {str(e)}\n{traceback.format_exc()}"
             self.write_log(error_msg, "ERROR")
             raise Exception(f"No se pudo insertar la tabla {dlake_tbl} en el Datalake.")
+        
+    def tables_validate(self, msg_notif: str = ""):
+        """ Envía el correo de validación de las tablas con las cifras de control generadas.
+
+            Args:
+            msg_notif (str): Mensaje adicional que se incluirá en el correo.
+
+            Returns:
+            None
+        """
+        self.write_log("Preparando envío de correo de validación de tablas.", "INFO")
+        bpa_email.tables_validate(config.ProcessName, self.gbl_df, self.LogFile, msg_notif)
+        self.write_log("Correo de validación de tablas enviado.", "INFO")
+
+
+
