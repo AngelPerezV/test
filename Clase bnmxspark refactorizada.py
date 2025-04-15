@@ -511,3 +511,350 @@ if errores:
         print(f"  - Línea {lineno}, columna {col}")
 else:
     print("¡Perfecto! No se encontró ninguna referencia a `.iteritems()` en el archivo.")
+
+... def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict): """ Lee archivos desde HDFS, obtiene metadatos, valida archivos esperados y genera vistas temporales.
+
+Args:
+        hdfs_directory (str): Ruta HDFS donde están los archivos.
+        files_config (dict): Diccionario de configuración por archivo esperado.
+
+    Returns:
+        None. Actualiza self.details_df
+    """
+    import subprocess
+    import pandas as pd
+    from pyspark import SparkFiles
+
+    self.write_log("Iniciando lectura y validación de archivos desde HDFS")
+
+    # Obtener listado de archivos en el directorio
+    try:
+        hdfs_ls_cmd = f"hdfs dfs -ls {hdfs_directory}"
+        result = subprocess.run(hdfs_ls_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise Exception(f"Error al listar archivos: {result.stderr}")
+
+        found_files = {}
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                file_path = parts[-1]
+                filename = os.path.basename(file_path)
+                modified = f"{parts[5]} {parts[6]}"
+                found_files[filename] = {
+                    "path": file_path,
+                    "last_modified": modified
+                }
+    except Exception as e:
+        self.write_log(f"Fallo al obtener listado de archivos: {str(e)}", "ERROR")
+        raise
+
+    file_details_list = []
+
+    for filename, file_cfg in files_config.items():
+        self.write_log(f"Procesando archivo: {filename}")
+
+        file_ext = filename.split(".")[-1].lower()
+        config_format = file_ext if file_ext in ["csv", "txt", "xls", "xlsx"] else "csv"
+        delimiter = file_cfg.get("delimiter", ",")
+        sheet_name = file_cfg.get("sheet", None)
+        spark_view = file_cfg.get("spark_name", filename.split(".")[0])
+
+        detail = {
+            "prefix": filename.split(".")[0],
+            "format": config_format,
+            "path": "N/A",
+            "name": filename,
+            "last_modified": "N/A",
+            "size_in_mb": "N/A",
+            "rows": "N/A",
+            "sheets": sheet_name or "N/A",
+            "status": "Error: file not found"
+        }
+
+        if filename in found_files:
+            file_path = found_files[filename]["path"]
+            detail["path"] = file_path
+            detail["last_modified"] = found_files[filename]["last_modified"]
+
+            try:
+                # Obtener tamaño en MB
+                hdfs_du_cmd = f"hdfs dfs -du -s {file_path}"
+                du_result = subprocess.run(hdfs_du_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if du_result.returncode == 0:
+                    size_bytes = int(du_result.stdout.strip().split()[0])
+                    detail["size_in_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                if config_format in ["csv", "txt"]:
+                    df = self.spark.read.option("header", "true").option("delimiter", delimiter).csv(file_path)
+                    detail["rows"] = df.count()
+                    df.createOrReplaceTempView(spark_view)
+                    detail["status"] = "ok"
+
+                elif config_format in ["xls", "xlsx"]:
+                    self.spark.sparkContext.addFile(f"hdfs://{hdfs_directory}/{filename}")
+                    local_path = SparkFiles.get(filename)
+
+                    df_pd = pd.read_excel(local_path, engine="openpyxl", sheet_name=sheet_name).astype(str)
+
+                    try:
+                        for col in df_pd.columns:
+                            if df_pd[col].str.contains(r"<[^>]+>", regex=True).any():
+                                self.write_log(f"Advertencia: Se detectó contenido XML en columna '{col}' del archivo {filename}. Será limpiado.", "WARNING")
+                                df_pd[col] = df_pd[col].str.replace(r"<[^>]+>", "", regex=True)
+                    except Exception as e:
+                        self.write_log(f"Error al limpiar contenido XML en {filename}: {str(e)}", "ERROR")
+                        detail["status"] = f"Error limpiando XML: {str(e)}"
+                        file_details_list.append(detail)
+                        continue
+
+                    df_spk = self.pandas_to_spark(df_pd, spark_view)
+                    detail["rows"] = df_spk.count()
+                    detail["status"] = "ok"
+
+                else:
+                    detail["status"] = "unsupported file type"
+
+            except Exception as e:
+                detail["status"] = f"Error: {str(e)}"
+                self.write_log(f"Error procesando {filename}: {str(e)}", "ERROR")
+        else:
+            self.write_log(f"Archivo esperado no encontrado: {filename}", "WARNING")
+
+        self.write_log(f"Resultado [{filename}]: {detail['status']} | Filas: {detail['rows']}")
+        file_details_list.append(detail)
+
+    self.details_df = pd.DataFrame(file_details_list)
+    self.write_log("Archivo de detalles actualizado en self.details_df")
+
+    def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict): 
+    """ Lee archivos desde HDFS, obtiene metadatos, valida archivos esperados y genera vistas temporales.
+
+            Args:
+        hdfs_directory (str): Ruta HDFS donde están los archivos.
+        files_config (dict): Diccionario de configuración por archivo esperado.
+
+            Returns:
+        None. Actualiza self.details_df
+    """
+    import subprocess
+    import pandas as pd
+    from pyspark import SparkFiles
+
+    self.write_log("Iniciando lectura y validación de archivos desde HDFS")
+
+    # Obtener listado de archivos en el directorio
+    try:
+        hdfs_ls_cmd = f"hdfs dfs -ls {hdfs_directory}"
+        result = subprocess.run(hdfs_ls_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise Exception(f"Error al listar archivos: {result.stderr}")
+
+        found_files = {}
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                file_path = parts[-1]
+                filename = os.path.basename(file_path)
+                modified = f"{parts[5]} {parts[6]}"
+                found_files[filename] = {
+                    "path": file_path,
+                    "last_modified": modified
+                }
+    except Exception as e:
+        self.write_log(f"Fallo al obtener listado de archivos: {str(e)}", "ERROR")
+        raise
+
+    file_details_list = []
+
+    for filename, file_cfg in files_config.items():
+        self.write_log(f"Procesando archivo: {filename}")
+
+        file_ext = filename.split(".")[-1].lower()
+        config_format = file_ext if file_ext in ["csv", "txt", "xls", "xlsx"] else "csv"
+        delimiter = file_cfg.get("delimiter", ",")
+        sheet_name = file_cfg.get("sheet", None)
+        spark_view = file_cfg.get("spark_name", filename.split(".")[0])
+
+        detail = {
+            "prefix": filename.split(".")[0],
+            "format": config_format,
+            "path": "N/A",
+            "name": filename,
+            "last_modified": "N/A",
+            "size_in_mb": "N/A",
+            "rows": "N/A",
+            "sheets": sheet_name or "N/A",
+            "status": "Error: file not found"
+        }
+
+        if filename in found_files:
+            file_path = found_files[filename]["path"]
+            detail["path"] = file_path
+            detail["last_modified"] = found_files[filename]["last_modified"]
+
+            try:
+                # Obtener tamaño en MB
+                hdfs_du_cmd = f"hdfs dfs -du -s {file_path}"
+                du_result = subprocess.run(hdfs_du_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if du_result.returncode == 0:
+                    size_bytes = int(du_result.stdout.strip().split()[0])
+                    detail["size_in_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                if config_format in ["csv", "txt"]:
+                    df = self.spark.read.option("header", "true").option("delimiter", delimiter).csv(file_path)
+                    detail["rows"] = df.count()
+                    df.createOrReplaceTempView(spark_view)
+                    detail["status"] = "ok"
+
+                elif config_format in ["xls", "xlsx"]:
+                    self.spark.sparkContext.addFile(f"hdfs://{hdfs_directory}/{filename}")
+                    local_path = SparkFiles.get(filename)
+
+                    df_pd = pd.read_excel(local_path, engine="openpyxl", sheet_name=sheet_name).astype(str)
+
+                    try:
+                        for col in df_pd.columns:
+                            if df_pd[col].str.contains(r"<[^>]+>", regex=True).any():
+                                self.write_log(f"Advertencia: Se detectó contenido XML en columna '{col}' del archivo {filename}. Será limpiado.", "WARNING")
+                                df_pd[col] = df_pd[col].str.replace(r"<[^>]+>", "", regex=True)
+                    except Exception as e:
+                        self.write_log(f"Error al limpiar contenido XML en {filename}: {str(e)}", "ERROR")
+                        detail["status"] = f"Error limpiando XML: {str(e)}"
+                        file_details_list.append(detail)
+                        continue
+
+                    df_spk = self.pandas_to_spark(df_pd, spark_view)
+                    detail["rows"] = df_spk.count()
+                    detail["status"] = "ok"
+
+                else:
+                    detail["status"] = "unsupported file type"
+
+            except Exception as e:
+                detail["status"] = f"Error: {str(e)}"
+                self.write_log(f"Error procesando {filename}: {str(e)}", "ERROR")
+        else:
+            self.write_log(f"Archivo esperado no encontrado: {filename}", "WARNING")
+
+        self.write_log(f"Resultado [{filename}]: {detail['status']} | Filas: {detail['rows']}")
+        file_details_list.append(detail)
+
+    self.details_df = pd.DataFrame(file_details_list)
+    self.write_log("Archivo de detalles actualizado en self.details_df")
+
+... def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict): """ Lee archivos desde HDFS, obtiene metadatos, valida archivos esperados y genera vistas temporales.
+
+Args:
+        hdfs_directory (str): Ruta HDFS donde están los archivos.
+        files_config (dict): Diccionario de configuración por archivo esperado.
+
+    Returns:
+        None. Actualiza self.details_df
+    """
+    import subprocess
+    import pandas as pd
+    from pyspark import SparkFiles
+
+    self.write_log("Iniciando lectura y validación de archivos desde HDFS")
+
+    # Obtener listado de archivos en el directorio
+    try:
+        hdfs_ls_cmd = f"hdfs dfs -ls {hdfs_directory}"
+        result = subprocess.run(hdfs_ls_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise Exception(f"Error al listar archivos: {result.stderr}")
+
+        found_files = {}
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                file_path = parts[-1]
+                filename = os.path.basename(file_path)
+                modified = f"{parts[5]} {parts[6]}"
+                found_files[filename] = {
+                    "path": file_path,
+                    "last_modified": modified
+                }
+    except Exception as e:
+        self.write_log(f"Fallo al obtener listado de archivos: {str(e)}", "ERROR")
+        raise
+
+    file_details_list = []
+
+    for filename, file_cfg in files_config.items():
+        self.write_log(f"Procesando archivo: {filename}")
+
+        file_ext = filename.split(".")[-1].lower()
+        config_format = file_ext if file_ext in ["csv", "txt", "xls", "xlsx"] else "csv"
+        delimiter = file_cfg.get("delimiter", ",")
+        sheet_name = file_cfg.get("sheet", None)
+        spark_view = file_cfg.get("spark_name", filename.split(".")[0])
+
+        detail = {
+            "prefix": filename.split(".")[0],
+            "format": config_format,
+            "path": "N/A",
+            "name": filename,
+            "last_modified": "N/A",
+            "size_in_mb": "N/A",
+            "rows": "N/A",
+            "sheets": sheet_name or "N/A",
+            "status": "Error: file not found"
+        }
+
+        if filename in found_files:
+            file_path = found_files[filename]["path"]
+            detail["path"] = file_path
+            detail["last_modified"] = found_files[filename]["last_modified"]
+
+            try:
+                # Obtener tamaño en MB
+                hdfs_du_cmd = f"hdfs dfs -du -s {file_path}"
+                du_result = subprocess.run(hdfs_du_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if du_result.returncode == 0:
+                    size_bytes = int(du_result.stdout.strip().split()[0])
+                    detail["size_in_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                if config_format in ["csv", "txt"]:
+                    df = self.spark.read.option("header", "true").option("delimiter", delimiter).csv(file_path)
+                    detail["rows"] = df.count()
+                    df.createOrReplaceTempView(spark_view)
+                    detail["status"] = "ok"
+
+                elif config_format in ["xls", "xlsx"]:
+                    self.spark.sparkContext.addFile(f"hdfs://{hdfs_directory}/{filename}")
+                    local_path = SparkFiles.get(filename)
+
+                    df_pd = pd.read_excel(local_path, engine="openpyxl", sheet_name=sheet_name).astype(str)
+
+                    try:
+                        for col in df_pd.columns:
+                            if df_pd[col].str.contains(r"<[^>]+>", regex=True).any():
+                                self.write_log(f"Advertencia: Se detectó contenido XML en columna '{col}' del archivo {filename}. Será limpiado.", "WARNING")
+                                df_pd[col] = df_pd[col].str.replace(r"<[^>]+>", "", regex=True)
+                    except Exception as e:
+                        self.write_log(f"Error al limpiar contenido XML en {filename}: {str(e)}", "ERROR")
+                        detail["status"] = f"Error limpiando XML: {str(e)}"
+                        file_details_list.append(detail)
+                        continue
+
+                    df_spk = self.pandas_to_spark(df_pd, spark_view)
+                    detail["rows"] = df_spk.count()
+                    detail["status"] = "ok"
+
+                else:
+                    detail["status"] = "unsupported file type"
+
+            except Exception as e:
+                detail["status"] = f"Error: {str(e)}"
+                self.write_log(f"Error procesando {filename}: {str(e)}", "ERROR")
+        else:
+            self.write_log(f"Archivo esperado no encontrado: {filename}", "WARNING")
+
+        self.write_log(f"Resultado [{filename}]: {detail['status']} | Filas: {detail['rows']}")
+        file_details_list.append(detail)
+
+    self.details_df = pd.DataFrame(file_details_list)
+    self.write_log("Archivo de detalles actualizado en self.details_df")
+
