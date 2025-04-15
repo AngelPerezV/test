@@ -858,3 +858,36 @@ Args:
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
 
+def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -> pyspark_df:
+    from pyspark.sql.types import StructField, StructType
+
+    def map_dtype(dtype):
+        dtype = str(dtype)
+        if "datetime" in dtype:
+            return StringType()
+        elif "int64" in dtype:
+            return LongType()
+        elif "int32" in dtype:
+            return IntegerType()
+        elif "float" in dtype:
+            return FloatType()
+        else:
+            return StringType()
+
+    try:
+        struct_fields = []
+        for col, dtype in zip(pandas_df.columns, pandas_df.dtypes):
+            struct_fields.append(StructField(col, map_dtype(dtype), True))
+
+        schema = StructType(struct_fields)
+        spark_df = self.spark.createDataFrame(pandas_df.astype(str), schema=schema)
+
+        if temp_view_name:
+            view_name = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view_name)
+
+        return spark_df
+
+    except Exception as e:
+        self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+        raise
