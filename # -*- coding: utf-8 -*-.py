@@ -298,3 +298,32 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
             spark_df.createOrReplaceTempView(view)
 
         return spark_df
+    
+    def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None, schema: StructType = None) -> pyspark_df:
+        """
+        Convierte un DataFrame de pandas a Spark:
+          - Limpia columnas numéricas en pandas
+          - Genera esquema si no se provee uno con define_schema
+          - Crea DataFrame usando lista de registros + esquema para evitar iteritems issues
+        """
+        # Limpieza básica: columnas object a numérico en pandas
+        obj_cols = pandas_df.select_dtypes(include="object").columns
+        for c in obj_cols:
+            cleaned = pandas_df[c].astype(str).str.replace(r"[^0-9.\-]", "", regex=True)
+            pandas_df[c] = pd.to_numeric(cleaned, errors="ignore")
+
+        # Determinar esquema final
+        final_schema = schema or self.define_schema(pandas_df)
+
+        # Convertir a lista de registros y crear DataFrame con esquema explícito
+        records = pandas_df.to_dict(orient="records")
+        spark_df = self.spark.createDataFrame(records, schema=final_schema)
+
+        # Registrar vista temporal si se indicó
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+
+        return spark_df
+
+    # ... resto de métodos (validate_tables, read_files_and_collect_details, etc.) ...
