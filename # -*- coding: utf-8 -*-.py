@@ -327,3 +327,51 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
         return spark_df
 
     # ... resto de métodos (validate_tables, read_files_and_collect_details, etc.) ...
+def define_schema_from_pandas(pandas_df: pd.DataFrame) -> StructType:
+    """
+    Crea un StructType de Spark a partir de los dtypes de un DataFrame de pandas,
+    usando zip sobre pandas_df.columns y pandas_df.dtypes.
+    """
+    mapping = {
+        "object": StringType(),
+        "int64": LongType(),
+        "int32": IntegerType(),
+        "float64": DoubleType(),
+        "float32": FloatType(),
+        "bool": BooleanType(),
+        "datetime64[ns]": TimestampType(),
+    }
+
+    fields = []
+    for col, dtype in zip(pandas_df.columns, pandas_df.dtypes.astype(str)):
+        spark_type = mapping.get(dtype, StringType())
+        fields.append(StructField(col, spark_type, True))
+
+    return StructType(fields)
+
+
+def pandas_to_spark_with_schema(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -> pyspark_df:
+    """
+    Convierte un pandas.DataFrame a Spark DataFrame:
+      1) Infiriendo esquema con define_schema_from_pandas().
+      2) Usando to_dict(orient='records') para evitar iteritems internos.
+      3) Opcionalmente registra como vista temporal.
+    """
+    # 1) Infiero el esquema
+    schema = define_schema_from_pandas(pandas_df)
+
+    # 2) Limpio NaNs y convierto todo a str para evitar conflictos
+    df_clean = pandas_df.fillna("").astype(str)
+
+    # 3) Paso a lista de registros
+    records = df_clean.to_dict(orient="records")
+
+    # 4) Creo el DataFrame de Spark con el esquema explícito
+    spark_df = self.spark.createDataFrame(records, schema=schema)
+
+    # 5) Registro como vista si piden nombre
+    if temp_view_name:
+        view = temp_view_name.split(".")[-1]
+        spark_df.createOrReplaceTempView(view)
+
+    return spark_df
