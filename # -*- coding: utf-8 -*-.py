@@ -166,3 +166,59 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
         except Exception as e:
             self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
             raise
+
+    def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -> pyspark_df:
+        """
+        Convierte un DataFrame de pandas a un DataFrame de Spark,
+        limpiando y casteando columnas numéricas, y manejando DataFrames vacíos.
+        """
+        from pyspark.sql.types import StructField, StructType
+
+        def map_dtype(dtype):
+            dtype_str = str(dtype)
+            if "datetime" in dtype_str:
+                return StringType()
+            elif "int" in dtype_str:
+                return LongType()
+            elif "float" in dtype_str:
+                return FloatType()
+            else:
+                return StringType()
+
+        try:
+            # Limpieza y conversión previa de columnas numéricas (elimina caracteres no numéricos)
+            for col in pandas_df.columns:
+                if pandas_df[col].dtype == object:
+                    cleaned = pandas_df[col].astype(str).str.replace(r"[^0-9.\-]", "", regex=True)
+                    pandas_df[col] = pd.to_numeric(cleaned, errors='ignore')
+
+            # Manejo de DataFrame vacío: inferir schema y crear DataFrame vacío
+            if pandas_df.empty:
+                struct_fields = []
+                for col in pandas_df.columns:
+                    struct_fields.append(StructField(col, map_dtype(pandas_df[col].dtype), True))
+                schema = StructType(struct_fields)
+                empty_rdd = self.spark.sparkContext.emptyRDD()
+                spark_df = self.spark.createDataFrame(empty_rdd, schema)
+                if temp_view_name:
+                    view_name = temp_view_name.split(".")[-1]
+                    spark_df.createOrReplaceTempView(view_name)
+                return spark_df
+
+            # Convertir a lista de registros y dejar que Spark infiera el schema
+            records = pandas_df.to_dict(orient="records")
+            spark_df = self.spark.createDataFrame(records)
+
+            if temp_view_name:
+                view_name = temp_view_name.split(".")[-1]
+                spark_df.createOrReplaceTempView(view_name)
+
+            return spark_df
+
+        except Exception as e:
+            self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+            raise
+
+        except Exception as e:
+            self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+            raise
