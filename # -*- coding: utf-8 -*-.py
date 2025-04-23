@@ -265,3 +265,36 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
             view = temp_view_name.split(".")[-1]
             spark_df.createOrReplaceTempView(view)
         return spark_df
+    
+
+    def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None, schema: StructType = None) -> pyspark_df:
+        """
+        Convierte un DataFrame de pandas a Spark:
+          - Limpia columnas numéricas en pandas
+          - Usa Arrow para inferir esquema si no se provee uno
+          - Usa records+schema si se provee
+        """
+        # 1. Limpieza básica: columnas object a numérico en pandas
+        obj_cols = pandas_df.select_dtypes(include="object").columns
+        for c in obj_cols:
+            cleaned = pandas_df[c].astype(str).str.replace(r"[^0-9.\-]", "", regex=True)
+            pandas_df[c] = pd.to_numeric(cleaned, errors="ignore")
+
+        # 2. Habilitar Arrow para mejora de rendimiento en inferencia
+        self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+
+        # 3. Crear DataFrame de Spark
+        if schema:
+            # Convertir a lista de dicts y aplicar schema
+            records = pandas_df.to_dict(orient="records")
+            spark_df = self.spark.createDataFrame(records, schema=schema)
+        else:
+            # Dejar que Spark (con Arrow) infiera automáticamente el esquema
+            spark_df = self.spark.createDataFrame(pandas_df)
+
+        # 4. Registrar vista temporal si se indicó
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+
+        return spark_df
