@@ -222,3 +222,46 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
         except Exception as e:
             self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
             raise
+
+    def define_schema(self, pandas_df: pd.DataFrame) -> StructType:
+        """
+        Genera un StructType de Spark a partir de los dtypes de pandas.
+        """
+        fields = []
+        for col, dtype in zip(pandas_df.columns, pandas_df.dtypes):
+            dt_str = str(dtype)
+            if "datetime" in dt_str:
+                typ = StringType()
+            elif "int" in dt_str:
+                typ = LongType()
+            elif "float" in dt_str:
+                typ = FloatType()
+            else:
+                typ = StringType()
+            fields.append(StructField(col, typ, True))
+        return StructType(fields)
+
+    def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None, schema: StructType = None) -> pyspark_df:
+        """
+        Convierte un DataFrame de pandas a Spark, limpiando numéricos y aplicando un esquema opcional.
+        """
+        # Limpieza básica de obj -> numérico
+        obj_cols = pandas_df.select_dtypes(include="object").columns
+        for c in obj_cols:
+            s = pandas_df[c].astype(str).str.replace(r"[^0-9.\-]", "", regex=True)
+            pandas_df[c] = pd.to_numeric(s, errors="ignore")
+
+        # Habilitar Arrow para rendimiento
+        self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+
+        # Determinar esquema
+        final_schema = schema or self.define_schema(pandas_df)
+
+        # Crear Spark DataFrame
+        spark_df = self.spark.createDataFrame(pandas_df, schema=final_schema)
+
+        # Crear vista temporal si aplica
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+        return spark_df
