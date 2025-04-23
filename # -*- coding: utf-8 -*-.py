@@ -132,3 +132,37 @@ def DLakeReplace(self, query_name, dlake_tbl: str):
         self.write_log(error_msg, "ERROR")
         # Relanza una excepción con mensaje más amigable
         raise Exception(f"No se pudo insertar la tabla {dlake_tbl} en el Datalake.")
+
+
+
+    def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -> pyspark_df:
+        """
+        Convierte un DataFrame de pandas a un DataFrame de Spark,
+        limpiando y casteando columnas numéricas para compatibilidad.
+        """
+        try:
+            # Limpieza y conversión previa de columnas numéricas (elimina caracteres no numéricos)
+            for col in pandas_df.columns:
+                if pandas_df[col].dtype == object:
+                    # Quita todo excepto dígitos, punto y signo negativo
+                    cleaned = pandas_df[col].astype(str).str.replace(r"[^0-9.\-]", "", regex=True)
+                    # Intenta convertir a numérico, si falla deja el original
+                    pandas_df[col] = pd.to_numeric(cleaned, errors='ignore')
+
+            # Convertir a lista de registros y dejar que Spark infiera el schema
+            records = pandas_df.to_dict(orient="records")
+            spark_df = self.spark.createDataFrame(records)
+
+            if temp_view_name:
+                view_name = temp_view_name.split(".")[-1]
+                spark_df.createOrReplaceTempView(view_name)
+
+            return spark_df
+
+        except Exception as e:
+            self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+            raise
+
+        except Exception as e:
+            self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+            raise
