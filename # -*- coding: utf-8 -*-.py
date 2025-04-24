@@ -516,3 +516,52 @@ class bnmxspark:
             spark_df.createOrReplaceTempView(view)
 
         return spark_df
+
+
+def DLakeReplace(self, query_name, dlake_tbl: str, partition_cols: list = None):
+    """
+    Inserta o sobreescribe datos en una tabla existente del Data Lake usando INSERT OVERWRITE.
+    
+    Args:
+        query_name: nombre de la vista temporal en Spark (str) o un DataFrame de Spark
+        dlake_tbl:  tabla destino en formato "db.schema.tabla"
+        partition_cols: lista de columnas de partición (ej. ["anio","mes"]) si es particionada
+    """
+    # 1. Obtén el DataFrame
+    if isinstance(query_name, str):
+        df = self.spark.table(query_name)
+    else:
+        df = query_name
+
+    # 2. Coalesce para ajustar particiones
+    df = df.coalesce(self.SparkPartitions)
+
+    # 3. Registra vista temporal de trabajo
+    tmp_view = "_tmp_replace"
+    df.createOrReplaceTempView(tmp_view)
+
+    # 4. Construye la sentencia SQL de INSERT OVERWRITE
+    if partition_cols:
+        # Si la tabla está particionada
+        part_clause = "PARTITION(" + ", ".join(partition_cols) + ")"
+        sql = f"""
+        INSERT OVERWRITE TABLE {dlake_tbl}
+        {part_clause}
+        SELECT * FROM {tmp_view}
+        """
+    else:
+        # Sobrescribe toda la tabla
+        sql = f"""
+        INSERT OVERWRITE TABLE {dlake_tbl}
+        SELECT * FROM {tmp_view}
+        """
+
+    # 5. Ejecuta el INSERT OVERWRITE
+    try:
+        self.write_log(f"Ejecutando: {sql}", "INFO")
+        self.spark.sql(sql)
+        self.write_log(f"Datos insertados en {dlake_tbl} exitosamente.", "INFO")
+    except Exception as e:
+        msg = f"No se pudo insertar en la tabla {dlake_tbl}: {str(e)}"
+        self.write_log(msg, "ERROR")
+        raise
