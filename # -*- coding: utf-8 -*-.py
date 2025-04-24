@@ -476,3 +476,43 @@ def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -
             spark_df.createOrReplaceTempView(view)
 
         return spark_df
+
+    from pyspark.sql import Row
+
+class bnmxspark:
+    # … tus __init__, session(), write_log(), define_schema_from_pandas() …
+
+    def pandas_to_spark(self, pandas_df, temp_view_name=None):
+        """
+        Convierte un pandas.DataFrame a Spark DataFrame SIN usar iteritems/items
+        ni createDataFrame(pandas_df) directo. Usa RDD + esquema explícito.
+        """
+        # 1) Vectorizar casteo en pandas
+        for col, dtype in zip(pandas_df.columns, pandas_df.dtypes):
+            if pd.api.types.is_integer_dtype(dtype):
+                pandas_df[col] = pd.to_numeric(pandas_df[col], errors="coerce").astype("Int64")
+            elif pd.api.types.is_float_dtype(dtype):
+                pandas_df[col] = pd.to_numeric(pandas_df[col], errors="coerce")
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                pandas_df[col] = pd.to_datetime(pandas_df[col], errors="coerce")
+
+        # 2) Inferir esquema con tu método (que usa zip, no items)
+        schema = self.define_schema_from_pandas(pandas_df)
+
+        # 3) Preparar los datos como lista de tuplas
+        #    - pandas_df.fillna(None) para convertir NaN a None
+        pdf = pandas_df.where(pd.notnull(pandas_df), None)
+        records = [tuple(row) for row in pdf.itertuples(index=False, name=None)]
+
+        # 4) Crear un RDD desde las tuplas
+        rdd = self.spark.sparkContext.parallelize(records)
+
+        # 5) Crear DataFrame de Spark usando el esquema explícito
+        spark_df = self.spark.createDataFrame(rdd, schema)
+
+        # 6) Registrar vista temporal si se indicó nombre
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+
+        return spark_df
