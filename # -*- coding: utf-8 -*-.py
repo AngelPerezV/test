@@ -441,3 +441,38 @@ def pandas_to_spark(self,
             spark_df.createOrReplaceTempView(view)
 
         return spark_df
+
+
+
+def pandas_to_spark(self, pandas_df: pd.DataFrame, temp_view_name: str = None) -> pyspark_df:
+        """
+        Convierte un pandas.DataFrame a un Spark DataFrame:
+          - Convierte columas numéricas de forma vectorizada (sin loops por fila).
+          - Usa Apache Arrow para acelerar la transferencia.
+          - Maneja DataFrames vacíos sin fallar.
+          - No emplea .iteritems() en ningún momento.
+        """
+        # 1) Vectorizamos el casteo en pandas
+        for col, dtype in pandas_df.dtypes.items():  # items() es seguro en pandas 2.x
+            if pd.api.types.is_integer_dtype(dtype):
+                pandas_df[col] = pd.to_numeric(pandas_df[col], errors="coerce").astype("Int64")
+            elif pd.api.types.is_float_dtype(dtype):
+                pandas_df[col] = pd.to_numeric(pandas_df[col], errors="coerce")
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                pandas_df[col] = pd.to_datetime(pandas_df[col], errors="coerce")
+
+        # 3) Crear el DataFrame de Spark
+        if pandas_df.shape[0] == 0:
+            # DataFrame vacío: inferir esquema y crear RDD vacío
+            schema = self.define_schema_from_pandas(pandas_df)
+            spark_df = self.spark.createDataFrame(self.spark.sparkContext.emptyRDD(), schema)
+        else:
+            # Dataset no vacío: Spark infiere el esquema automáticamente con Arrow
+            spark_df = self.spark.createDataFrame(pandas_df)
+
+        # 4) Registrar vista temporal si se pide
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+
+        return spark_df
