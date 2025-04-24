@@ -516,3 +516,46 @@ class bnmxspark:
             spark_df.createOrReplaceTempView(view)
 
         return spark_df
+
+
+data VariablesCorregidas2;
+    set seguros;
+
+    /* --- num_contrato --- */
+    if vtype(num_contrato) = "C" and notdigit(strip(num_contrato)) = 0 then do;
+        c_num_contrato = input(num_contrato, 8.);
+        if not missing(c_num_contrato) then do;
+            drop num_contrato;
+            rename c_num_contrato = num_contrato;
+            format num_contrato 8.;
+        end;
+    end;
+
+    /* --- yr --- */
+    if vtype(yr) = "C" and notdigit(strip(yr)) = 0 then do;
+        c_yr = input(yr, 8.);
+        if not missing(c_yr) then do;
+            drop yr;
+            rename c_yr = yr;
+            format yr 8.;
+        end;
+    end;
+
+    /* --- contrato-folio --- */
+    if vtype('contrato-folio'n) = "C" and notdigit(strip('contrato-folio'n)) = 0 then do;
+        c_contrato_folio = input('contrato-folio'n, 8.);
+        if not missing(c_contrato_folio) then do;
+            drop 'contrato-folio'n;
+            rename c_contrato_folio = contrato_folio;
+            format contrato_folio 8.;
+        end;
+    end;
+
+    /* --- sexo --- */
+    if vtype(sexo) = "N" then do;
+        c_sexo = put(sexo, $3.);
+        drop sexo;
+        rename c_sexo = sexo;
+        format sexo $3.;
+    end;
+run;
