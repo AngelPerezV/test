@@ -375,3 +375,69 @@ def pandas_to_spark_with_schema(self, pandas_df: pd.DataFrame, temp_view_name: s
         spark_df.createOrReplaceTempView(view)
 
     return spark_df
+
+
+
+
+def pandas_to_spark(self,
+                        pandas_df: pd.DataFrame,
+                        temp_view_name: str = None) -> pyspark_df:
+        """
+        Convierte un pandas.DataFrame a Spark DataFrame con casting estricto:
+          - Infiriendo esquema con define_schema_from_pandas()
+          - Casteando cada valor Python al tipo exacto
+          - Evitando pasar strings a columnas numéricas
+        """
+        # 1) Infiero esquema desde pandas
+        schema = self.define_schema_from_pandas(pandas_df)
+
+        # 2) Limpio NaNs → None para que Spark los interprete como NULL
+        df_clean = pandas_df.where(pd.notnull(pandas_df), None)
+
+        # 3) Construyo registros casteados
+        records = []
+        for row in df_clean.to_dict(orient="records"):
+            rec = {}
+            for field in schema.fields:
+                name = field.name
+                dtype = field.dataType
+                val = row.get(name)
+                # NULL
+                if val is None:
+                    rec[name] = None
+                # Enteros
+                elif isinstance(dtype, (IntegerType, LongType)):
+                    try:
+                        rec[name] = int(val)
+                    except:
+                        rec[name] = None
+                # Flotantes
+                elif isinstance(dtype, (FloatType, DoubleType)):
+                    try:
+                        rec[name] = float(val)
+                    except:
+                        rec[name] = None
+                # Booleanos
+                elif isinstance(dtype, BooleanType):
+                    rec[name] = bool(val)
+                # Timestamps: esperamos un datetime o string ISO
+                elif isinstance(dtype, TimestampType):
+                    rec[name] = val  # Spark aceptará str ISO o datetime
+                # Cualquier otro tipo → string
+                else:
+                    rec[name] = str(val)
+            records.append(rec)
+
+        # 4) Creo el DataFrame de Spark con el esquema explícito
+        try:
+            spark_df = self.spark.createDataFrame(records, schema=schema)
+        except Exception as e:
+            self.write_log(f"Error en pandas_to_spark para vista '{temp_view_name}': {str(e)}", "ERROR")
+            raise
+
+        # 5) Registro como vista temporal si se indicó nombre
+        if temp_view_name:
+            view = temp_view_name.split(".")[-1]
+            spark_df.createOrReplaceTempView(view)
+
+        return spark_df
