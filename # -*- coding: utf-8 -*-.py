@@ -626,3 +626,59 @@ def safe_dlake_replace(df: DataFrame,
 #     dlake_tbl="mx.tabla", 
 #     partition_cols=None
 # )
+
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col
+
+def safe_dlake_replace_adapt(df: DataFrame,
+                              spark,
+                              SparkPartitions: int,
+                              dlake_tbl: str):
+    """
+    Reemplaza los datos de una tabla Hive no particionada, adaptando el esquema automáticamente.
+
+    Args:
+        df             : Spark DataFrame de entrada.
+        spark          : SparkSession activa.
+        SparkPartitions: Número de particiones para coalesce.
+        dlake_tbl      : Nombre de la tabla Hive (formato db.tabla).
+    """
+    # 1. Validaciones básicas
+    if not isinstance(df, DataFrame):
+        raise TypeError(f"Esperaba un Spark DataFrame, no {type(df)}")
+    if not isinstance(SparkPartitions, int) or SparkPartitions <= 0:
+        raise ValueError(f"SparkPartitions inválido: {SparkPartitions!r}")
+
+    # 2. Leer esquema de la tabla destino
+    try:
+        schema_info = spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+        hive_schema = schema_info[~schema_info["col_name"].str.contains("#")][["col_name", "data_type"]]
+    except Exception as e:
+        print(f"❌ Error leyendo el esquema de {dlake_tbl}: {str(e)}")
+        raise
+
+    # 3. Cast automático del DataFrame
+    cols_casted = []
+    for row in hive_schema.itertuples(index=False):
+        colname, datatype = row.col_name, row.data_type
+        if colname in df.columns:
+            cols_casted.append(col(colname).cast(datatype).alias(colname))
+        else:
+            raise ValueError(f"La columna '{colname}' no está presente en el DataFrame.")
+
+    df_casted = df.select(*cols_casted).coalesce(SparkPartitions)
+    df_casted.createOrReplaceTempView("_tmp_replace")
+
+    # 4. Ejecutar INSERT OVERWRITE
+    sql_text = f"""
+        INSERT OVERWRITE TABLE {dlake_tbl}
+        SELECT * FROM _tmp_replace
+    """
+
+    try:
+        print(f"Ejecutando SQL:\n{sql_text.strip()}")
+        spark.sql(sql_text)
+        print(f"✅ Datos insertados correctamente en {dlake_tbl} con coalesce({SparkPartitions})")
+    except Exception as e:
+        print(f"❌ Error en INSERT OVERWRITE: {str(e)}")
+        raise
