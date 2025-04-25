@@ -1220,3 +1220,58 @@ def dlake_replace_hdfs(spark, temp_view_or_df, dlake_tbl: str, temp_path_hdfs: s
         raise RuntimeError(f"Error moviendo {temp_write_path} a {target_path_hdfs}")
 
     print(f"✅ Reemplazo exitoso de datos en {dlake_tbl}.")
+
+
+import subprocess
+import os
+from pyspark.sql import DataFrame
+
+def safe_dlake_replace_adapt(spark, temp_view_or_df, dlake_tbl: str, temp_path_hdfs: str = "/tmp/dlake_temp"):
+    """
+    Reemplaza de forma segura los datos de una tabla en HDFS.
+    Si falla el proceso, no se borran datos productivos.
+
+    Args:
+        spark:             SparkSession activa.
+        temp_view_or_df:   Nombre de vista temporal en Spark o un DataFrame.
+        dlake_tbl:         Nombre de la tabla destino (formato: 'db.tabla').
+        temp_path_hdfs:    Carpeta temporal HDFS donde escribir antes de mover.
+    """
+    # 1. Obtener DataFrame
+    if isinstance(temp_view_or_df, str):
+        df = spark.table(temp_view_or_df)
+    elif isinstance(temp_view_or_df, DataFrame):
+        df = temp_view_or_df
+    else:
+        raise TypeError("temp_view_or_df debe ser nombre de vista o un Spark DataFrame.")
+
+    # 2. Definir rutas
+    temp_write_path = os.path.join(temp_path_hdfs, dlake_tbl.replace('.', '_'))
+    final_target_path = f"/user/hive/warehouse/{dlake_tbl.replace('.', '.db.')}/"
+
+    print(f"Escribiendo temporalmente en: {temp_write_path}")
+
+    try:
+        # 3. Escribir DataFrame en formato parquet
+        df.write.mode("overwrite").parquet(temp_write_path)
+        print(f"✅ Parquet temporal escrito en {temp_write_path}")
+
+        # 4. Borrar datos anteriores del destino (sin borrar metadata Hive)
+        print(f"Eliminando datos antiguos de: {final_target_path}")
+        delete_cmd = f"hdfs dfs -rm -r -skipTrash {final_target_path}*"
+        subprocess.run(delete_cmd, shell=True, check=False, capture_output=True)
+
+        # 5. Mover nuevos archivos al destino
+        print(f"Moviendo datos nuevos a: {final_target_path}")
+        move_cmd = f"hdfs dfs -mv {temp_write_path}/* {final_target_path}"
+        move_result = subprocess.run(move_cmd, shell=True, capture_output=True, text=True)
+
+        if move_result.returncode != 0:
+            print(f"❌ Error moviendo archivos:\nSTDOUT:\n{move_result.stdout}\nSTDERR:\n{move_result.stderr}")
+            raise RuntimeError(f"Error moviendo {temp_write_path} a {final_target_path}")
+
+        print(f"✅ Reemplazo exitoso de datos en {dlake_tbl}")
+
+    except Exception as e:
+        print(f"❌ Error crítico en safe_dlake_replace_adapt: {str(e)}")
+        raise
