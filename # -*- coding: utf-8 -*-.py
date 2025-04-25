@@ -565,3 +565,64 @@ def DLakeReplace(self, query_name, dlake_tbl: str, partition_cols: list = None):
         msg = f"No se pudo insertar en la tabla {dlake_tbl}: {str(e)}"
         self.write_log(msg, "ERROR")
         raise
+from pyspark.sql import DataFrame
+
+def safe_dlake_replace(df: DataFrame,
+                       spark,
+                       SparkPartitions: int,
+                       dlake_tbl: str,
+                       partition_cols: list = None):
+    """
+    Inserta o sobreescribe datos en una tabla existente usando INSERT OVERWRITE,
+    validando antes que df sea un Spark DataFrame y SparkPartitions sea un int > 0.
+
+    Args:
+        df             : DataFrame de Spark a escribir.
+        spark          : SparkSession activa.
+        SparkPartitions: número de particiones a usar en coalesce.
+        dlake_tbl      : tabla destino en formato "db.schema.tabla".
+        partition_cols : lista de columnas de partición si la tabla está particionada.
+    """
+    # 1) Validar inputs
+    if not isinstance(df, DataFrame):
+        raise TypeError(f"Esperaba un Spark DataFrame, no {type(df)}")
+    if not isinstance(SparkPartitions, int) or SparkPartitions <= 0:
+        raise ValueError(f"SparkPartitions inválido: {SparkPartitions!r}")
+
+    # 2) Reducir particiones de forma segura
+    df2 = df.coalesce(SparkPartitions)
+
+    # 3) Registrar vista temporal
+    tmp_view = "_tmp_replace"
+    df2.createOrReplaceTempView(tmp_view)
+
+    # 4) Generar SQL de INSERT OVERWRITE
+    if partition_cols:
+        part_clause = "PARTITION(" + ", ".join(partition_cols) + ")"
+        sql = f"""
+            INSERT OVERWRITE TABLE {dlake_tbl}
+            {part_clause}
+            SELECT * FROM {tmp_view}
+        """
+    else:
+        sql = f"""
+            INSERT OVERWRITE TABLE {dlake_tbl}
+            SELECT * FROM {tmp_view}
+        """
+
+    # 5) Ejecutar y devolver mensaje
+    print(f"Ejecutando:\n{sql}")
+    spark.sql(sql)
+    print(f"✅ Datos insertados en {dlake_tbl} using coalesce({SparkPartitions})")
+
+# — Ejemplo de uso en tu notebook — 
+# (ajusta spark, df_test, SparkPartitions y dlake_tbl a tu entorno)
+
+# df_test = spark.read.table("origen_intermedio")
+# safe_dlake_replace(
+#     df=df_test,
+#     spark=spark,
+#     SparkPartitions=10,
+#     dlake_tbl="mx.tabla", 
+#     partition_cols=None
+# )
