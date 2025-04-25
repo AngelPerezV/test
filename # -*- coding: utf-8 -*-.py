@@ -747,4 +747,78 @@ def safe_dlake_replace_adapt(df: DataFrame,
         print(f"✅ Datos insertados en {dlake_tbl} con coalesce({SparkPartitions}) correctamente.")
     except Exception as e:
         raise RuntimeError(f"❌ Error al insertar en {dlake_tbl}:\n{str(e)}")
-    
+
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col
+
+class bnmxspark:
+    # ... tus otros métodos como __init__, session(), write_log(), etc.
+
+    def DLakeReplace(self, temp_view_or_df, dlake_tbl: str, partition_cols: list = None):
+        """
+        Inserta o sobreescribe datos en una tabla del Data Lake.
+        Adapta automáticamente el esquema y soporta tablas particionadas.
+
+        Args:
+            temp_view_or_df: Nombre de vista temporal de Spark o un DataFrame de Spark.
+            dlake_tbl       : Tabla destino en formato "base.tabla".
+            partition_cols  : Lista de columnas de partición, si aplica.
+        """
+        # 1. Obtener DataFrame
+        if isinstance(temp_view_or_df, str):
+            df = self.spark.table(temp_view_or_df)
+        elif isinstance(temp_view_or_df, DataFrame):
+            df = temp_view_or_df
+        else:
+            raise TypeError("temp_view_or_df debe ser el nombre de una vista temporal o un Spark DataFrame.")
+
+        # 2. Obtener esquema de la tabla destino
+        try:
+            schema_info = self.spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+            hive_schema = schema_info[~schema_info["col_name"].str.contains("#")][["col_name", "data_type"]]
+        except Exception as e:
+            self.write_log(f"Error describiendo la tabla {dlake_tbl}: {e}", "ERROR")
+            raise
+
+        # 3. Preparar columnas del DataFrame para castear
+        df_cols = {c.lower().split('.')[-1]: c for c in df.columns}
+        cols_casted = []
+
+        for row in hive_schema.itertuples(index=False):
+            colname_hive = row.col_name.lower()
+            hive_type = row.data_type
+            match_col = df_cols.get(colname_hive)
+
+            if not match_col:
+                raise ValueError(f"Columna '{row.col_name}' de Hive no encontrada en el DataFrame: {list(df.columns)}")
+
+            cols_casted.append(col(match_col).cast(hive_type).alias(row.col_name))
+
+        df_casted = df.select(*cols_casted).coalesce(self.SparkPartitions)
+
+        # 4. Crear vista temporal
+        tmp_view = "_tmp_replace"
+        df_casted.createOrReplaceTempView(tmp_view)
+
+        # 5. Armar SQL dinámico
+        if partition_cols:
+            part_clause = "PARTITION(" + ", ".join(partition_cols) + ")"
+            sql_text = f"""
+                INSERT OVERWRITE TABLE {dlake_tbl}
+                {part_clause}
+                SELECT * FROM {tmp_view}
+            """
+        else:
+            sql_text = f"""
+                INSERT OVERWRITE TABLE {dlake_tbl}
+                SELECT * FROM {tmp_view}
+            """
+
+        # 6. Ejecutar
+        try:
+            self.write_log(f"Ejecutando SQL:\n{sql_text.strip()}", "INFO")
+            self.spark.sql(sql_text)
+            self.write_log(f"✅ Datos insertados en {dlake_tbl} correctamente con coalesce({self.SparkPartitions})", "INFO")
+        except Exception as e:
+            self.write_log(f"Error en DLakeReplace para {dlake_tbl}: {str(e)}", "ERROR")
+            raise
