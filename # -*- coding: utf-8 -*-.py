@@ -1275,3 +1275,75 @@ def safe_dlake_replace_adapt(spark, temp_view_or_df, dlake_tbl: str, temp_path_h
     except Exception as e:
         print(f"❌ Error crítico en safe_dlake_replace_adapt: {str(e)}")
         raise
+
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col
+
+class bnmxspark:
+    # … tus métodos __init__, session(), write_log(), etc. …
+
+    def DLakeReplace(self,
+                     temp_view_or_df,
+                     dlake_tbl: str,
+                     partition_cols: list = None,
+                     debug_schema: bool = False):
+        """
+        Inserta o sobreescribe datos en una tabla Hive existente.
+        Adapta automáticamente el esquema y soporta particiones.
+
+        Args:
+          temp_view_or_df: Nombre de vista temporal (str) o DataFrame de Spark.
+          dlake_tbl      : Tabla destino en formato "db.tabla".
+          partition_cols : Lista de columnas de partición si aplica.
+          debug_schema   : Si True, imprime esquema Hive vs DataFrame antes de insertar.
+        """
+        # 1) Obtener DataFrame
+        if isinstance(temp_view_or_df, str):
+            df = self.spark.table(temp_view_or_df)
+        elif isinstance(temp_view_or_df, DataFrame):
+            df = temp_view_or_df
+        else:
+            raise TypeError("temp_view_or_df debe ser nombre de vista o un Spark DataFrame.")
+
+        if df is None:
+            raise ValueError(f"El DataFrame para {temp_view_or_df} es None. Verifica que exista la vista o variable.")
+
+        # 2) Leer esquema de Hive
+        schema_df = self.spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+        hive_schema = schema_df[~schema_df["col_name"].str.startswith("#")][["col_name","data_type"]]
+
+        # 3) Preparar cast y alias de columnas
+        df_cols = {c.lower().split('.')[-1]: c for c in df.columns}
+        casted = []
+        for name, dtype in hive_schema.itertuples(index=False):
+            key = name.lower()
+            if key not in df_cols:
+                raise ValueError(f"Columna '{name}' del esquema Hive no encontrada en el DataFrame: {df.columns}")
+            casted.append(col(df_cols[key]).cast(dtype).alias(name))
+
+        # 4) Seleccionar, castear y coalesce
+        df2 = df.select(*casted).coalesce(self.SparkPartitions)
+
+        # 5) Debug de esquemas opcional
+        if debug_schema:
+            print("=== Esquema Hive destino ===")
+            print(hive_schema.to_string(index=False))
+            print("\n=== Esquema DataFrame casteado ===")
+            df2.printSchema()
+            print()
+
+        # 6) Vista temporal y SQL dinámico
+        tmp = "_tmp_replace"
+        df2.createOrReplaceTempView(tmp)
+
+        if partition_cols:
+            part = "PARTITION(" + ", ".join(partition_cols) + ")"
+            sql = f"INSERT OVERWRITE TABLE {dlake_tbl} {part} SELECT * FROM {tmp}"
+        else:
+            sql = f"INSERT OVERWRITE TABLE {dlake_tbl} SELECT * FROM {tmp}"
+
+        # 7) Ejecutar
+        self.write_log(f"Ejecutando SQL:\n{sql}", "INFO")
+        self.spark.sql(sql)
+        self.write_log(f"✅ Datos insertados en {dlake_tbl} usando coalesce({self.SparkPartitions})", "INFO")
+        
