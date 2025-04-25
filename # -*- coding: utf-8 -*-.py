@@ -909,4 +909,38 @@ class bnmxspark:
         except Exception as e:
             self.write_log(f"Error en DLakeReplace para {dlake_tbl}: {str(e)}", "ERROR")
             raise
-        
+
+%macro validar_convertir(vars=);
+  /* DATA step: lee SEGUROS y escribe VARIABLESCORREGIDAS2 */
+  data VariablesCorregidas2;
+    set seguros;
+
+    /* Recorre cada nombre en vars= */
+    %let i = 1;
+    %let v = %scan(&vars, &i, %str( ));
+    %do %while(&v ne);
+
+      /* 
+         INPUT(...,??best12.) devuelve missing si hay cualquier no-dígito;
+         sólo convierte las vars que resultan 100% numéricas.
+      */
+      _tmp = input(&v, ?? best12.);
+
+      if not missing(_tmp) then do;
+        /* Creación de la versión numérica, con formato entero */
+        &v._num = _tmp;
+        format &v._num 8.;
+        drop &v;                     /* Elimina la versión carácter */
+        rename &v._num = &v;         /* Renombra la nueva var */
+      end;
+      else drop _tmp;                /* Si no era totalmente numérica, la deja como estaba */
+
+      /* Siguiente variable */
+      %let i = %eval(&i + 1);
+      %let v = %scan(&vars, &i, %str( ));
+    %end;
+  run;
+%mend validar_convertir;
+
+/* —— Ejemplo de uso —— */
+%validar_convertir(vars=id age cod_postal salario);
