@@ -944,3 +944,37 @@ class bnmxspark:
 
 /* —— Ejemplo de uso —— */
 %validar_convertir(vars=id age cod_postal salario);
+
+
+%macro validar_convertir(vars=   /* ej: id   age   salario */
+                        ,fmts=   /* ej: 8.  8.2  comma12. */
+                        );
+  %let n = %sysfunc(countw(&vars));
+
+  data VariablesCorregidas2;
+    set seguros;
+
+    %do i = 1 %to &n;
+      %let v   = %scan(&vars, &i, %str( ));
+      %let fmt = %scan(&fmts, &i, %str( ));
+
+      /* conversión silenciosa */
+      _tmp = input(&v, ?? &fmt);
+
+      if not missing(_tmp) then do;
+        &v._num = _tmp;
+        /* aplicamos el formato específico de esta var */
+        format &v._num &fmt;
+        drop &v _tmp;
+        rename &v._num = &v;
+      end;
+      else drop _tmp;
+    %end;
+  run;
+%mend validar_convertir;
+
+/* Ejemplo: id→8., age→8.2, salario→comma12. */
+%validar_convertir(
+  vars=id age salario,
+  fmts=8. 8.2 comma12.
+);
