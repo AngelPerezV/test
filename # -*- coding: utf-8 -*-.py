@@ -1121,3 +1121,57 @@ def dlake_replace_test(spark, temp_view_or_df, dlake_tbl: str, partition_cols: l
     except Exception as e:
         print(f"❌ Error en DLakeReplace: {e}")
         raise
+
+import subprocess
+import os
+
+def dlake_replace_hdfs(spark, temp_view_or_df, dlake_tbl: str, temp_path_hdfs: str = "/tmp/dlake_temp", mode: str = "overwrite"):
+    """
+    Reemplaza una tabla del Data Lake usando HDFS subprocess + Spark write, basado en vista o DataFrame.
+    
+    Args:
+        spark:             SparkSession activa.
+        temp_view_or_df:   Nombre de vista temporal en Spark o un DataFrame.
+        dlake_tbl:         Nombre de tabla destino, formato 'db.tabla'.
+        temp_path_hdfs:    Ruta temporal en HDFS (default: '/tmp/dlake_temp').
+        mode:              'overwrite' (borra destino) o 'append' (solo agrega sin borrar destino).
+    """
+    # 1. Obtener el DataFrame
+    if isinstance(temp_view_or_df, str):
+        try:
+            df = spark.table(temp_view_or_df)
+        except Exception as e:
+            raise ValueError(f"No se pudo encontrar la vista temporal '{temp_view_or_df}': {e}")
+    else:
+        df = temp_view_or_df
+
+    # 2. Escribir DataFrame a HDFS temporal en formato parquet
+    temp_write_path = os.path.join(temp_path_hdfs, dlake_tbl.replace('.', '_'))
+    print(f"Escribiendo datos a HDFS temporal: {temp_write_path}")
+
+    try:
+        df.write.mode("overwrite").parquet(temp_write_path)
+        print(f"✅ Datos escritos en {temp_write_path}")
+    except Exception as e:
+        raise ValueError(f"Error escribiendo el DataFrame a HDFS temporal: {e}")
+
+    # 3. Construir ruta final basada en hive warehouse
+    target_path_hdfs = f"/user/hive/warehouse/{dlake_tbl.replace('.', '.db.')}/"
+
+    print(f"Destino final en HDFS: {target_path_hdfs}")
+
+    # 4. Mover datos usando hdfs dfs
+    try:
+        if mode == "overwrite":
+            delete_cmd = f"hdfs dfs -rm -r -skipTrash {target_path_hdfs}"
+            print(f"Ejecutando: {delete_cmd}")
+            subprocess.run(delete_cmd, shell=True, check=False)  # No truena si no existe (primera vez)
+
+        move_cmd = f"hdfs dfs -mv {temp_write_path} {target_path_hdfs}"
+        print(f"Ejecutando: {move_cmd}")
+        subprocess.run(move_cmd, shell=True, check=True)
+
+        print(f"✅ Datos movidos a {target_path_hdfs} correctamente.")
+
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Error en operaciones HDFS:\n{e}")
