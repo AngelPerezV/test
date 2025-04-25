@@ -682,3 +682,69 @@ def safe_dlake_replace_adapt(df: DataFrame,
     except Exception as e:
         print(f"❌ Error en INSERT OVERWRITE: {str(e)}")
         raise
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col
+
+def safe_dlake_replace_adapt(df: DataFrame,
+                              spark,
+                              SparkPartitions: int,
+                              dlake_tbl: str):
+    """
+    Inserta datos en una tabla Hive no particionada,
+    adaptando automáticamente el esquema (corrige diferencias de nombre, tipo, puntos o mayúsculas).
+    
+    Args:
+        df             : Spark DataFrame.
+        spark          : SparkSession activa.
+        SparkPartitions: Número de particiones a aplicar con coalesce.
+        dlake_tbl      : Nombre de la tabla destino, formato "base.tabla".
+    """
+    if not isinstance(df, DataFrame):
+        raise TypeError(f"Se esperaba un Spark DataFrame, no {type(df)}.")
+    if not isinstance(SparkPartitions, int) or SparkPartitions <= 0:
+        raise ValueError(f"SparkPartitions inválido: {SparkPartitions!r}")
+
+    # 1. Obtener el esquema de la tabla destino desde Hive
+    try:
+        schema_info = spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+        hive_schema = schema_info[~schema_info["col_name"].str.contains("#")][["col_name", "data_type"]]
+    except Exception as e:
+        raise RuntimeError(f"❌ Error al describir la tabla {dlake_tbl}: {e}")
+
+    # 2. Preparar columnas del DataFrame para hacer match con el esquema Hive
+    #    (usando claves sin puntos y en minúscula para robustez)
+    df_cols = {c.lower().split('.')[-1]: c for c in df.columns}
+    cols_casted = []
+
+    for row in hive_schema.itertuples(index=False):
+        colname_hive = row.col_name.lower()
+        hive_type = row.data_type
+
+        match_col = df_cols.get(colname_hive)
+
+        if not match_col:
+            raise ValueError(f"Columna '{row.col_name}' del esquema Hive no encontrada en el DataFrame.\n"
+                             f"Columnas del DF: {list(df.columns)}")
+
+        # Casteamos y renombramos a como lo espera Hive
+        cols_casted.append(col(match_col).cast(hive_type).alias(row.col_name))
+
+    # 3. Crear DataFrame casted y reducir particiones
+    df_casted = df.select(*cols_casted).coalesce(SparkPartitions)
+
+    # 4. Crear vista temporal
+    tmp_view = "_tmp_replace"
+    df_casted.createOrReplaceTempView(tmp_view)
+
+    # 5. Ejecutar INSERT OVERWRITE
+    sql_text = f"""
+        INSERT OVERWRITE TABLE {dlake_tbl}
+        SELECT * FROM {tmp_view}
+    """
+    try:
+        print(f"Ejecutando SQL:\n{sql_text.strip()}")
+        spark.sql(sql_text)
+        print(f"✅ Datos insertados en {dlake_tbl} con coalesce({SparkPartitions}) correctamente.")
+    except Exception as e:
+        raise RuntimeError(f"❌ Error al insertar en {dlake_tbl}:\n{str(e)}")
+    
