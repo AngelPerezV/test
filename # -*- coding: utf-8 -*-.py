@@ -1497,4 +1497,84 @@ class bnmxspark:
             msg = f"❌ Error en DLakeReplace para {dlake_tbl}: {str(e)}"
             self.write_log(msg, "ERROR")
             raise
-       
+
+from pyspark.sql.functions import col, regexp_replace, when
+from pyspark.sql import DataFrame as pyspark_df
+
+def DLake_Replace(self, temp_view_or_df, dlake_tbl: str, *argsv, debug_schema: bool = True):
+    """
+    Inserta o sobreescribe datos en una tabla Hive existente. Adapta automáticamente el esquema y soporta particiones.
+
+    Args:
+        temp_view_or_df (str | pyspark.sql.DataFrame): Nombre de vista temporal o un DataFrame de Spark.
+        dlake_tbl (str): Tabla destino en formato "db.tabla".
+        *argsv: Argumentos adicionales.
+        debug_schema (bool): Si True, imprime esquema Hive vs DataFrame antes de insertar.
+    """
+    # 1. Obtener DataFrame
+    if isinstance(temp_view_or_df, str):
+        df = self.spark.table(temp_view_or_df)
+    elif isinstance(temp_view_or_df, pyspark_df):
+        df = temp_view_or_df
+    else:
+        raise TypeError("temp_view_or_df debe ser nombre de vista o un Spark DataFrame.")
+
+    if df is None:
+        raise ValueError("El DataFrame es None. Verifica que exista la vista o variable.")
+
+    # 2. Validar si tiene datos
+    count_df = df.count()
+    if count_df == 0:
+        self.write_log("! Advertencia: El DataFrame está vacío. No se realizará el INSERT.", "WARNING")
+        return
+    else:
+        self.write_log(f"& El DataFrame tiene {count_df} filas. Procediendo a insertarlo en {dlake_tbl}.", "INFO")
+
+    # 3. Leer esquema de Hive
+    schema_df = self.spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+    hive_schema = schema_df[~schema_df["col_name"].str.startswith("#")][["col_name", "data_type"]]
+
+    # 4. Preparar cast y alias de columnas
+    patron_decimal = r"^-?\d+(\.\d+)?$"
+    df_cols = {c.lower(): c for c in df.columns}
+    casted = []
+
+    for name, dtype in hive_schema.itertuples(index=False):
+        key = name.lower()
+        if key not in df_cols:
+            raise ValueError(f"Columna '{name}' del esquema Hive no encontrada en el DataFrame: {df.columns}")
+
+        spark_col = col(df_cols[key])
+        clean_col = regexp_replace(spark_col, ",", "")
+        clean_col = regexp_replace(clean_col, " ", "")
+
+        if dtype.lower() in ("float", "double", "decimal(18,12)", "decimal(38,18)"):
+            casted_col = when(clean_col.rlike(patron_decimal), clean_col.cast(dtype)).otherwise(None).alias(name)
+        else:
+            casted_col = clean_col.cast(dtype).alias(name)
+
+        casted.append(casted_col)
+
+    # 5. Aplicar transformación
+    df2 = df.select(*casted)
+
+    # 6. Debug opcional
+    if debug_schema:
+        self.write_log(f"Esquema Hive: {hive_schema}", "DEBUG")
+        self.write_log(f"Esquema DataFrame: {df2.printSchema()}", "DEBUG")
+
+    # 7. Vista temporal y SQL dinámico
+    tmp = "_tmp_replace"
+    df2.createOrReplaceTempView(tmp)
+
+    try:
+        if len(argsv) > 0:
+            df2.write.mode("overwrite").format("parquet").insertInto(dlake_tbl, overwrite=False)
+        else:
+            df2.write.mode("overwrite").insertInto(dlake_tbl, overwrite=True)
+    except Exception as e:
+        msg = f"X Error en DLake_Replace para {dlake_tbl}: {str(e)}"
+        self.write_log(msg, "ERROR")
+        raise
+
+    self.write_log(f"Datos insertados en [{dlake_tbl}] exitosamente ({count_df} registros).", "INFO")
