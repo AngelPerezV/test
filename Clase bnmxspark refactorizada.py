@@ -1169,3 +1169,54 @@ def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
     )
     print(f"Reemplazando datos en tabla mensual entre {start_date} y {end_date}")
     conex.DLake_Replace(tabla, mensual)
+
+
+import datetime
+from dateutil.relativedelta import relativedelta
+
+def Historica(conex, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.datetime.today().date()  # Corrección: obtener la fecha actual correctamente
+    format = "%Y-%m-%d"
+
+    # Obtener el mes anterior y el mes anteanterior
+    mes_anterior = hoy.replace(day=1) - relativedelta(months=1)
+    mes_anteanterior = hoy.replace(day=1) - relativedelta(months=2)
+
+    print("Mes anterior:", mes_anterior.strftime("%B %Y"))
+    print("Mes anteanterior:", mes_anteanterior.strftime("%B %Y"))
+
+    # Obtener fechas ya presentes en la tabla mensual
+    try:
+        fechas_ingestadas = conex.spark.table(mensual).select(processdate).distinct().toPandas()
+        fechas_ingestadas[processdate] = pd.to_datetime(fechas_ingestadas[processdate])
+        meses_ingestados = fechas_ingestadas[processdate].dt.to_period("M").unique().tolist()
+        meses_ingestados = [str(m) for m in meses_ingestados]
+    except Exception as e:
+        print("No se pudo leer la tabla mensual o está vacía:", e)
+        meses_ingestados = []
+
+    def ingesta_mes(fecha_base):
+        mes_str = fecha_base.strftime("%Y-%m")
+        if mes_str not in meses_ingestados:
+            start_date = fecha_base.replace(day=1)
+            end_date = (start_date + relativedelta(months=1)) - datetime.timedelta(days=1)
+            print(f"Iniciando ingesta de {mes_str} desde {start_date} hasta {end_date}")
+            
+            # Validamos si hay datos disponibles en la tabla diaria
+            tabla_filtrada = conex.spark.table(diaria).where(
+                f"{campoFecha} between '{start_date}' and '{end_date}'"
+            )
+            if tabla_filtrada.take(1):  # Si hay al menos una fila
+                conex.DLake_Replace(tabla_filtrada, mensual)
+                print(f"Ingesta exitosa para {mes_str}")
+            else:
+                print(f"No hay datos disponibles en diaria para {mes_str}, se omite.")
+        else:
+            print(f"El mes {mes_str} ya fue ingestado, se omite.")
+
+    # Ingestar mes anterior
+    ingesta_mes(mes_anterior)
+
+    # Solo intentar mes anteanterior si no está presente
+    if mes_anteanterior.strftime("%Y-%m") not in meses_ingestados:
+        ingesta_mes(mes_anteanterior)
