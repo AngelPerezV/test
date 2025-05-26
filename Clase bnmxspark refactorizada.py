@@ -1010,3 +1010,54 @@ def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict
 
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
+
+
+
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.date.today()  # Fecha del día de hoy
+    ocho_mes = hoy.day in range(7, 16)  # Validar que la fecha de hoy esté entre el 7 y el 15 del mes
+    rangos_max = conex.spark.table(mensual).select('*')  # Obtener el mes máximo de la tabla mensual
+    r_max = rangos_max.selectExpr("sf-max(processdate) as max_date").collect()[0]["max_date"]
+    format = "%Y-%m-%d"
+
+    try:
+        print("Intentando obtener fecha máxima")
+        print("r_max:", r_max)
+        d = datetime.datetime.strptime(r_max, format)
+    except Exception as e:
+        print('Excepción al obtener fecha máxima:', e)
+        r_max = datetime.date.today() + relativedelta(months=-1)
+        d = datetime.datetime.strptime(r_max, format)
+    
+    print("Mes actual:", d.month, "Mes de hoy:", hoy.month)
+    mes_pasado = d.month
+
+    if ocho_mes:
+        if (d.month == 12 and hoy.month == 1) or (d.month == hoy.month):
+            print("Escribiendo tablas para el mes actual")
+            for i, j in zip(range(len(fechas_iniciales)), range(len(fechas_finales))):
+                if fechas_iniciales[i].month == mes_pasado:
+                    start_date = fechas_iniciales[i]
+                    end_date = fechas_finales[j]
+                    print("Iniciando consulta para:", start_date, "-", end_date)
+                    consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha)
+                else:
+                    print("La tabla ya estaba actualizada")
+            
+            # Verificar y realizar ingesta para meses anteriores si no están actualizados
+            meses_faltantes = [mes_pasado - 1, mes_pasado - 2]  # Mes anterior y anteanterior
+            for mes in meses_faltantes:
+                if mes >= 1:
+                    print(f"Verificando ingesta para el mes {mes}")
+                    fecha_inicial = datetime.date(hoy.year, mes, 1)
+                    fecha_final = datetime.date(hoy.year, mes, 30)  # Asumiendo mes completo por simplicidad
+                    print("Iniciando consulta para:", fecha_inicial, "-", fecha_final)
+                    consulta_tablas(conex, fecha_inicial, fecha_final, diaria, mensual, campoFecha)
+        else:
+            print("No se hace nada")
+    else:
+        print("No se hace nada porque no está en el rango de fechas esperado")
+
+def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
+    tabla = conex.spark.table(diaria).select("*").where(f"{campoFecha} between '{start_date}' and '{end_date}'")
+    conex.DLake_Replace(tabla, mensual)
