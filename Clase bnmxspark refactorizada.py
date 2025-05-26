@@ -1061,3 +1061,34 @@ def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFec
 def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
     tabla = conex.spark.table(diaria).select("*").where(f"{campoFecha} between '{start_date}' and '{end_date}'")
     conex.DLake_Replace(tabla, mensual)
+
+import datetime
+from dateutil.relativedelta import relativedelta
+
+def Historica(conex, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.date.today()
+    format = "%Y-%m-%d"
+
+    try:
+        r_max = conex.spark.table(mensual).selectExpr(f"max({processdate}) as max_date").collect()[0]["max_date"]
+        ultima_fecha = datetime.datetime.strptime(r_max, format).date()
+    except:
+        print("No se encontró fecha máxima, se asumirá un inicio manual.")
+        ultima_fecha = datetime.date(hoy.year, hoy.month, 1) - relativedelta(months=6)
+
+    # Crear lista de meses faltantes desde la última fecha hasta el mes actual
+    mes_actual = datetime.date(hoy.year, hoy.month, 1)
+    fecha_iteracion = ultima_fecha + relativedelta(months=1)
+
+    while fecha_iteracion < mes_actual:
+        inicio_mes = fecha_iteracion
+        fin_mes = (inicio_mes + relativedelta(months=1)) - datetime.timedelta(days=1)
+
+        print(f"Ingestando datos del {inicio_mes} al {fin_mes}")
+        consulta_tablas(conex, inicio_mes, fin_mes, diaria, mensual, campoFecha)
+
+        fecha_iteracion += relativedelta(months=1)
+
+def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
+    tabla = conex.spark.table(diaria).select("*").where(f"{campoFecha} BETWEEN '{start_date}' AND '{end_date}'")
+    conex.DLake_Replace(tabla, mensual)
