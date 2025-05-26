@@ -1092,3 +1092,80 @@ def Historica(conex, diaria, mensual, campoFecha, processdate):
 def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
     tabla = conex.spark.table(diaria).select("*").where(f"{campoFecha} BETWEEN '{start_date}' AND '{end_date}'")
     conex.DLake_Replace(tabla, mensual)
+
+
+import datetime
+from dateutil.relativedelta import relativedelta
+
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.date.today()  # Fecha actual
+    print(f"Hoy: {hoy}")
+
+    ocho_mes = hoy.day in range(7, 16)  # Ejecutar entre el 7 y el 15 del mes
+
+    # Obtener la fecha máxima ingestada (último processdate en tabla mensual)
+    try:
+        r_max_row = conex.spark.table(mensual).selectExpr(f"max({processdate}) as max_date").collect()
+        r_max = r_max_row[0]["max_date"]
+
+        if isinstance(r_max, str):
+            r_max = datetime.datetime.strptime(r_max, "%Y-%m-%d").date()
+        elif isinstance(r_max, datetime.datetime):
+            r_max = r_max.date()
+        elif isinstance(r_max, datetime.date):
+            pass  # ya está bien
+        else:
+            raise ValueError("Tipo de dato inesperado en fecha máxima")
+
+    except Exception as e:
+        print("No se pudo obtener la fecha máxima, usando mes anterior como fallback:", e)
+        r_max = hoy + relativedelta(months=-1)
+
+    print("Última fecha ingestada:", r_max)
+
+    mes_pasado = r_max.month
+    año_pasado = r_max.year
+
+    # Si estamos en la ventana de días (7 al 15)
+    if ocho_mes:
+        # Si aún no se ha ingestido el mes actual
+        if (r_max.month == 12 and hoy.month == 1 and hoy.year > r_max.year) or \
+           (r_max.month < hoy.month or (r_max.month == hoy.month and hoy.year > r_max.year)):
+
+            print("Ingestando tabla mensual del mes anterior...")
+
+            for i, j in zip(range(len(fechas_iniciales)), range(len(fechas_finales))):
+                if fechas_iniciales[i].month == mes_pasado:
+                    start_date = fechas_iniciales[i]
+                    end_date = fechas_finales[j]
+                    print(f"Ingestando: {start_date} - {end_date}")
+                    consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha)
+
+            # 🔁 Extra: intentar ingestar también meses anteriores faltantes
+            meses_faltantes = [(hoy.year, hoy.month - 1), (hoy.year, hoy.month - 2)]
+            for año, mes in meses_faltantes:
+                if mes <= 0:
+                    mes += 12
+                    año -= 1
+
+                ya_ingestado = (mes == mes_pasado and año == año_pasado)
+                if not ya_ingestado:
+                    try:
+                        fecha_inicio = datetime.date(año, mes, 1)
+                        fecha_fin = fecha_inicio + relativedelta(day=31)
+                        print(f"Intentando ingestar: {fecha_inicio} - {fecha_fin}")
+                        consulta_tablas(conex, fecha_inicio, fecha_fin, diaria, mensual, campoFecha)
+                    except Exception as e:
+                        print(f"No se pudo ingestar mes {mes}/{año}:", e)
+        else:
+            print("La tabla ya estaba actualizada")
+    else:
+        print("No es fecha de ejecución (fuera del rango 7 al 15)")
+
+
+def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha):
+    tabla = conex.spark.table(diaria).select("*").where(
+        f"{campoFecha} BETWEEN '{start_date}' AND '{end_date}'"
+    )
+    print(f"Reemplazando datos en tabla mensual entre {start_date} y {end_date}")
+    conex.DLake_Replace(tabla, mensual)
