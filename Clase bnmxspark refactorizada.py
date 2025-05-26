@@ -1220,3 +1220,31 @@ def Historica(conex, diaria, mensual, campoFecha, processdate):
     # Solo intentar mes anteanterior si no está presente
     if mes_anteanterior.strftime("%Y-%m") not in meses_ingestados:
         ingesta_mes(mes_anteanterior)
+
+def ingesta_mes(fecha_base):
+    mes_str = fecha_base.strftime("%Y-%m")
+    if mes_str not in meses_ingestados:
+        start_date = fecha_base.replace(day=1)
+        end_date = (start_date + relativedelta(months=1)) - datetime.timedelta(days=1)
+        print(f"Iniciando ingesta de {mes_str} desde {start_date} hasta {end_date}")
+
+        # Leer tabla diaria
+        tabla_filtrada = conex.spark.table(diaria).where(
+            f"{campoFecha} between '{start_date}' and '{end_date}'"
+        )
+
+        if tabla_filtrada.take(1):  # Si hay al menos una fila
+            # Eliminar columna processdate si ya existe, para evitar duplicados
+            if processdate in tabla_filtrada.columns:
+                tabla_filtrada = tabla_filtrada.drop(processdate)
+            
+            # Agregar columna de fecha de proceso
+            tabla_filtrada = tabla_filtrada.withColumn(processdate, sf.lit(str(datetime.datetime.today().date())))
+            
+            # Reemplazar en tabla mensual
+            conex.DLake_Replace(tabla_filtrada, mensual)
+            print(f"Ingesta exitosa para {mes_str}")
+        else:
+            print(f"No hay datos disponibles en diaria para {mes_str}, se omite.")
+    else:
+        print(f"El mes {mes_str} ya fue ingestado, se omite.")
