@@ -1366,3 +1366,66 @@ def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFec
         ingesta_mes(mes_anteanterior)   # Solo si marzo no está
     else:
         print("No está en el rango de fechas (7-15), no se hace nada.")
+
+import datetime
+from dateutil.relativedelta import relativedelta
+from pyspark.sql import functions as sf
+
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.date.today()
+    ocho_mes = hoy.day in range(7, 16)
+
+    try:
+        r_max = conex.spark.table(mensual).selectExpr(f"max({processdate}) as max_date").collect()[0]["max_date"]
+        d = datetime.datetime.strptime(r_max, "%Y-%m-%d").date()
+    except Exception as e:
+        print("Error al obtener fecha máxima:", e)
+        d = hoy + relativedelta(months=-1)
+
+    mes_actual = hoy.month
+    anio_actual = hoy.year
+
+    # Definimos los meses a validar: anteanterior y anterior
+    meses = [
+        (anio_actual, mes_actual - 2),  # mes anteanterior
+        (anio_actual, mes_actual - 1),  # mes anterior
+    ]
+
+    # Ajustamos si los meses quedan en valores negativos
+    meses = [(a - 1 if m <= 0 else a, m + 12 if m <= 0 else m) for a, m in meses]
+
+    if ocho_mes:
+        insertar_anteriores = []
+        for anio, mes in meses:
+            existe = conex.spark.table(mensual).filter(
+                f"month({processdate}) = {mes} and year({processdate}) = {anio}"
+            ).count() > 0
+            insertar_anteriores.append((anio, mes, not existe))
+
+        # Solo insertar mes anteanterior si también falta el mes anterior
+        if insertar_anteriores[1][2]:  # Si mes anterior no existe
+            for idx in [0, 1]:  # Anteanterior y anterior
+                anio, mes, debe_insertar = insertar_anteriores[idx]
+                if debe_insertar:
+                    start_date = datetime.date(anio, mes, 1)
+                    end_date = (start_date + relativedelta(months=1)) - datetime.timedelta(days=1)
+
+                    tabla_filtrada = conex.spark.table(diaria).filter(
+                        f"{campoFecha} between '{start_date}' and '{end_date}'"
+                    )
+
+                    if idx == 0:  # Mes anteanterior
+                        process_date_value = (end_date + relativedelta(months=1)).replace(day=1) - datetime.timedelta(days=1)
+                    else:  # Mes anterior
+                        process_date_value = end_date
+
+                    print(f"Ingestando mes {mes}/{anio} con processdate: {process_date_value}")
+                    tabla_final = tabla_filtrada.withColumn(processdate, sf.lit(str(process_date_value)))
+                    conex.DLake_Replace(tabla_final, mensual)
+                else:
+                    print(f"Ya existe información para {mes}/{anio}, no se ingesta.")
+        else:
+            print("El mes anterior ya existe, no se insertará el anteanterior.")
+    else:
+        print("No estás entre el 7 y el 15 del mes. No se hace nada.")
+
