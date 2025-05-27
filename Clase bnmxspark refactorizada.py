@@ -1304,3 +1304,65 @@ def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFec
         ingesta_mes(mes_anteanterior)   # Solo si marzo no está
     else:
         print("No está en el rango de fechas (7-15), no se hace nada.")
+
+    import datetime
+from dateutil.relativedelta import relativedelta
+from pyspark.sql import functions as sf
+
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFecha, processdate):
+    hoy = datetime.datetime.today().date()
+    ocho_mes = hoy.day in range(7, 16)  # Solo ejecutar entre el día 7 y 15
+
+    # Obtener meses ya existentes en la tabla mensual
+    try:
+        rangos_max = conex.spark.table(mensual).select(processdate)
+        meses_ingestados = rangos_max.select(
+            sf.date_format(processdate, "yyyy-MM")
+        ).distinct().rdd.map(lambda x: x[0]).collect()
+    except Exception as e:
+        print("No se pudo leer la tabla mensual, se asume vacía.")
+        print("Error:", e)
+        meses_ingestados = []
+
+    print("Meses ya ingresados en la tabla mensual:", meses_ingestados)
+
+    # Obtener mes anterior y ante-anterior
+    mes_actual = hoy.replace(day=1)
+    mes_anterior = mes_actual - relativedelta(months=1)
+    mes_anteanterior = mes_actual - relativedelta(months=2)
+
+    def ingesta_mes(fecha_base):
+        mes_str = fecha_base.strftime("%Y-%m")
+        if mes_str not in meses_ingestados:
+            start_date = fecha_base.replace(day=1)
+            end_date = (start_date + relativedelta(months=1)) - datetime.timedelta(days=1)
+            print(f"Iniciando ingesta de {mes_str} desde {start_date} hasta {end_date}")
+
+            tabla_filtrada = conex.spark.table(diaria).where(
+                f"{campoFecha} between '{start_date}' and '{end_date}'"
+            )
+
+            if tabla_filtrada.take(1):  # Si hay datos
+                # Eliminar 'processdate' si ya existe, sin importar formato
+                columnas_actuales = [col.lower() for col in tabla_filtrada.columns]
+                if processdate.lower() in columnas_actuales:
+                    print(f"Columna {processdate} ya existe, se eliminará.")
+                    tabla_filtrada = tabla_filtrada.drop(processdate)
+
+                # Agregar columna de fecha de proceso
+                hoy_str = str(datetime.datetime.today().date())
+                tabla_filtrada = tabla_filtrada.withColumn(processdate, sf.lit(hoy_str))
+
+                # Reemplazar en tabla mensual
+                conex.DLake_Replace(tabla_filtrada, mensual)
+                print(f"Ingesta exitosa para {mes_str}")
+            else:
+                print(f"No hay datos en diaria para {mes_str}, se omite.")
+        else:
+            print(f"El mes {mes_str} ya fue ingresado, se omite.")
+
+    if ocho_mes:
+        ingesta_mes(mes_anterior)       # Intentar abril (si estamos en mayo)
+        ingesta_mes(mes_anteanterior)   # Solo si marzo no está
+    else:
+        print("No está en el rango de fechas (7-15), no se hace nada.")
