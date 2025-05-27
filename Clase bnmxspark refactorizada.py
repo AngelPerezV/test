@@ -1428,4 +1428,16 @@ def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campoFec
             print("El mes anterior ya existe, no se insertará el anteanterior.")
     else:
         print("No estás entre el 7 y el 15 del mes. No se hace nada.")
+#dinamico
 
+SET hive.exec.dynamic.partition.mode=nonstrict;
+
+INSERT INTO tabla_destino PARTITION (processdate)
+SELECT columna1, columna2, columna3, processdate
+FROM tabla_origen
+WHERE condiciones;
+#no dinamico
+INSERT INTO tabla_destino PARTITION (processdate='2025-04-30')
+SELECT columna1, columna2, columna3  -- sin processdate
+FROM tabla_origen
+WHERE condiciones;
