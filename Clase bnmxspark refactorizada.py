@@ -1759,3 +1759,97 @@ class Mascota:
 mi_mascota = Mascota("Luna", "gato")
 saludar_dueno("Carlos")
 mi_mascota.hacer_sonido()
+
+def DLake_Replace(self,
+                  temp_view_or_df,
+                  dlake_tbl: str,
+                  *argsv,
+                  debug_schema: bool = True):
+    """
+    Inserta o sobreescribe datos en una tabla Hive existente.
+    Adapta automáticamente el esquema y soporta particiones,
+    aplicando un 'safe cast' para evitar el error de convertir
+    strings no numéricos a float/double/decimal.
+    
+    Args:
+        temp_view_or_df: Nombre de vista temporal (str) o DataFrame de Spark.
+        dlake_tbl      : Tabla destino en formato "db.tabla".
+        *argsv         : Si se pasa cualquier argumento, usará parquet insertInto sin overwrite.
+        debug_schema   : Si True, imprime esquemas antes de insertar.
+    """
+    from pyspark.sql import DataFrame as pyspark_df
+    from pyspark.sql.functions import col, regexp_replace, when
+
+    # 1) Obtener DataFrame
+    if isinstance(temp_view_or_df, str):
+        df = self.spark.table(temp_view_or_df)
+    elif isinstance(temp_view_or_df, pyspark_df):
+        df = temp_view_or_df
+    else:
+        raise TypeError("temp_view_or_df debe ser nombre de vista o un Spark DataFrame.")
+    if df is None:
+        raise ValueError(f"El DataFrame para {temp_view_or_df} es None.")
+
+    # 2) Validar si tiene datos
+    count_df = df.count()
+    if count_df == 0:
+        self.write_log("! Advertencia: El DataFrame está vacío. No se realizará el INSERT.", "WARNING")
+        return
+    else:
+        self.write_log(f"El DataFrame tiene {count_df} filas. Procediendo con {dlake_tbl}.", "INFO")
+
+    # 3) Leer esquema de Hive
+    schema_df   = self.spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+    hive_schema = schema_df[~schema_df["col_name"].str.startswith("#")][["col_name","data_type"]]
+
+    # 4) Preparar 'safe cast' y alias de columnas
+    df_cols        = {c.lower().split('.')[-1]: c for c in df.columns}
+    casted         = []
+    patron_decimal = r"^-?\d+(\.\d+)?$"
+    numeric_pref   = ("float","double","decimal")
+
+    for name, dtype in hive_schema.itertuples(index=False):
+        key = name.lower()
+        if key not in df_cols:
+            raise ValueError(f"Columna '{name}' no encontrada en el DataFrame: {df.columns}")
+        spark_col = col(df_cols[key])
+        clean_col = regexp_replace(spark_col, r"[^0-9\.-]", "")
+        if any(dtype.lower().startswith(p) for p in numeric_pref):
+            # solo castea los valores que cumplen el patrón numérico
+            casted_col = when(
+                clean_col.rlike(patron_decimal),
+                clean_col.cast(dtype)
+            ).otherwise(None).alias(name)
+        else:
+            casted_col = spark_col.cast(dtype).alias(name)
+        casted.append(casted_col)
+
+    # 5) Seleccionar, castear y coalesce
+    df2 = df.select(*casted).coalesce(self.SparkPartitions)
+
+    # 6) Debug de esquemas opcional
+    if debug_schema:
+        print("=== Esquema Hive destino ===")
+        print(hive_schema.to_string(index=False))
+        print("\n=== Esquema DataFrame casteado ===")
+        df2.printSchema()
+        print()
+
+    # 7) Vista temporal y ejecución
+    tmp = "_tmp_replace"
+    df2.createOrReplaceTempView(tmp)
+
+    try:
+        if len(argsv) > 0:
+            # insertInto parquet sin overwrite
+            df2.write.mode("overwrite").format("parquet") \
+               .insertInto(dlake_tbl, overwrite=False)
+        else:
+            sql = f"INSERT OVERWRITE TABLE {dlake_tbl} SELECT * FROM {tmp}"
+            self.write_log(f"Ejecutando SQL:\n{sql}", "INFO")
+            self.spark.sql(sql)
+            self.write_log(f"✅ Datos insertados en {dlake_tbl} ({count_df} registros).", "INFO")
+    except Exception as e:
+        msg = f"Error en DLake_Replace para {dlake_tbl}: {e}"
+        self.write_log(msg, "ERROR")
+        raise
