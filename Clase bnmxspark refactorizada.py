@@ -1579,3 +1579,126 @@ def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict
     import pandas as pd
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
+
+def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict):
+    """
+    Lee archivos desde HDFS, obtiene metadatos, valida archivos esperados y genera vistas temporales.
+    """
+    import os
+    import subprocess
+    import pandas as pd
+    from pyspark import SparkFiles
+
+    self.write_log("Iniciando lectura y validación de archivos desde HDFS")
+
+    # 1) Listar archivos en HDFS
+    try:
+        hdfs_ls_cmd = f"hdfs dfs -ls {hdfs_directory}"
+        result = subprocess.run(hdfs_ls_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise Exception(f"Error al listar archivos: {result.stderr}")
+
+        found_files = {}
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                file_path = parts[-1]
+                filename = os.path.basename(file_path)
+                modified = f"{parts[5]} {parts[6]}"
+                found_files[filename] = {
+                    "path": file_path,
+                    "last_modified": modified
+                }
+    except Exception as e:
+        self.write_log(f"Fallo al obtener listado de archivos: {e}", "ERROR")
+        raise
+
+    file_details_list = []
+
+    # 2) Procesar cada archivo según files_config
+    for filename, file_cfg in files_config.items():
+        self.write_log(f"Procesando archivo: {filename}")
+
+        file_ext     = filename.split(".")[-1].lower()
+        config_format= file_ext if file_ext in ["csv", "txt", "xls", "xlsx"] else "csv"
+        delimiter    = file_cfg.get("delimiter", ",")
+        sheet_name   = file_cfg.get("sheet", None)
+        spark_view   = file_cfg.get("spark_name", filename.split(".")[0])
+
+        detail = {
+            "prefix": filename.split(".")[0],
+            "format": config_format,
+            "path": "N/A",
+            "name": filename,
+            "last_modified": "N/A",
+            "size_in_mb": "N/A",
+            "rows": "N/A",
+            "sheets": sheet_name or "Todas",
+            "status": "Error: file not found"
+        }
+
+        if filename in found_files:
+            file_path = found_files[filename]["path"]
+            detail["path"]          = file_path
+            detail["last_modified"] = found_files[filename]["last_modified"]
+
+            try:
+                # 3) Tamaño en MB
+                hdfs_du_cmd = f"hdfs dfs -du -s {file_path}"
+                du_result   = subprocess.run(hdfs_du_cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if du_result.returncode == 0:
+                    size_bytes = int(du_result.stdout.strip().split()[0])
+                    detail["size_in_mb"] = round(size_bytes / (1024 * 1024), 2)
+
+                # 4) Lectura según formato
+                if config_format in ["csv", "txt"]:
+                    df = ( self.spark.read
+                           .option("header", "true")
+                           .option("delimiter", delimiter)
+                           .csv(file_path) )
+                    detail["rows"] = df.count()
+                    df.createOrReplaceTempView(spark_view)
+                    detail["status"] = "ok"
+
+                else:  # Excel
+                    # bajar al nodo local
+                    self.spark.sparkContext.addFile(file_path)
+                    local_path = SparkFiles.get(filename)
+
+                    if sheet_name:
+                        # leer solo la hoja indicada
+                        combined_df = pd.read_excel(local_path, sheet_name=sheet_name, engine="openpyxl")
+                        combined_df["__sheet_name"] = sheet_name
+                    else:
+                        # leer todas las hojas
+                        all_sheets = pd.read_excel(local_path, sheet_name=None, engine="openpyxl")
+                        combined_df = pd.DataFrame()
+                        for sheet, sheet_df in all_sheets.items():
+                            sheet_df["__sheet_name"] = sheet
+                            combined_df = pd.concat([combined_df, sheet_df], ignore_index=True)
+
+                    # convertir a string y limpiar HTML/XML
+                    combined_df = combined_df.astype(str)
+                    for col in combined_df.columns:
+                        if combined_df[col].str.contains(r"<[^>]+>", regex=True).any():
+                            self.write_log(f"Advertencia: limpiando HTML en '{col}'", "WARNING")
+                            combined_df[col] = combined_df[col].str.replace(r"<[^>]+>", "", regex=True)
+
+                    df_spk = self.pandas_to_spark(combined_df, spark_view)
+                    detail["rows"]   = df_spk.count()
+                    detail["status"] = "ok"
+
+            except Exception as e:
+                detail["status"] = f"Error: {e}"
+                self.write_log(f"Error procesando {filename}: {e}", "ERROR")
+
+        else:
+            self.write_log(f"Archivo esperado no encontrado: {filename}", "WARNING")
+
+        self.write_log(f"Resultado [{filename}]: {detail['status']} | Filas: {detail['rows']}")
+        file_details_list.append(detail)
+
+    # 5) Guardar resumen en pandas DataFrame
+    import pandas as pd
+    self.details_df = pd.DataFrame(file_details_list)
+    self.write_log("Archivo de detalles actualizado en self.details_df")
