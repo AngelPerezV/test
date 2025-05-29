@@ -1738,3 +1738,24 @@ class Mascota:
 mi_mascota = Mascota("Luna", "gato")
 saludar_dueno("Carlos")
 mi_mascota.hacer_sonido()
+
+
+def saludar_dueno(nombre_dueno):
+    print(f"¡Hola {nombre_dueno}! Aquí está tu mascota:")
+
+class Mascota:
+    def __init__(self, nombre, tipo):
+        self.nombre = nombre
+        self.tipo = tipo
+
+    def hacer_sonido(self):
+        if self.tipo == "perro":
+            print(f"{self.nombre} dice: ¡Guau!")
+        elif self.tipo == "gato":
+            print(f"{self.nombre} dice: ¡Miau!")
+        else:
+            print(f"{self.nombre} hace un sonido desconocido")
+
+mi_mascota = Mascota("Luna", "gato")
+saludar_dueno("Carlos")
+mi_mascota.hacer_sonido()
