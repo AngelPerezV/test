@@ -1702,3 +1702,39 @@ def read_files_and_collect_details(self, hdfs_directory: str, files_config: dict
     import pandas as pd
     self.details_df = pd.DataFrame(file_details_list)
     self.write_log("Archivo de detalles actualizado en self.details_df")
+
+
+# Una LIBRERÍA es un conjunto de herramientas listas para usar (como funciones o clases), por ejemplo: pandas, math, etc.
+
+# Una FUNCIÓN es un bloque de código que hace algo específico y se puede reutilizar.
+# Ejemplo: def saludar(): print("Hola")
+
+# Una CLASE es un molde para crear objetos. Dentro puede haber métodos (funciones) y atributos (datos).
+# Ejemplo: class Perro: def ladrar(self): print("Guau")
+
+# Un MÉTODO es una función que está dentro de una clase.
+# Ejemplo: en la clase Perro, 'ladrar' es un método.
+
+# Un ATRIBUTO es una variable que pertenece a un objeto. Guarda información.
+# Ejemplo: self.nombre = nombre
+
+# Un OBJETO es una instancia (una copia viva) de una clase.
+# Ejemplo: mi_perro = Perro()
+
+# Relación general:
+# La clase es el molde ➜ el objeto es lo creado con ese molde
+# El objeto tiene atributos (datos) y métodos (acciones)
+# Las funciones pueden estar dentro (métodos) o fuera de una clase (funciones normales)
+
+def saludar_dueno(nombre_dueno): print(f"¡Hola {nombre_dueno}! Aquí está tu mascota:")
+
+class Mascota:
+    def __init__(self, nombre, tipo): self.nombre = nombre; self.tipo = tipo
+    def hacer_sonido(self):
+        if self.tipo == "perro": print(f"{self.nombre} dice: ¡Guau!")
+        elif self.tipo == "gato": print(f"{self.nombre} dice: ¡Miau!")
+        else: print(f"{self.nombre} hace un sonido desconocido")
+
+mi_mascota = Mascota("Luna", "gato")
+saludar_dueno("Carlos")
+mi_mascota.hacer_sonido()
