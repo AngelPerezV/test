@@ -1853,3 +1853,20 @@ def DLake_Replace(self,
         msg = f"Error en DLake_Replace para {dlake_tbl}: {e}"
         self.write_log(msg, "ERROR")
         raise
+
+    # Detecta y convierte encoding a UTF-8
+import chardet
+
+# 1. Detectar encoding
+with open("main.py", "rb") as f:
+    result = chardet.detect(f.read())
+
+print(f"Encoding detectado: {result['encoding']}")
+
+# 2. Usar el encoding detectado para convertir
+with open("main.py", "r", encoding=result["encoding"]) as f:
+    content = f.read()
+
+with open("main_utf8.py", "w", encoding="utf-8") as f:
+    f.write(content)
+
