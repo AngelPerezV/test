@@ -2534,3 +2534,81 @@ if __name__ == "__main__":
         high_threshold=400,
         low_threshold=200
     )
+
+import pandas as pd
+
+def ReportFrame(report_name: str, report: pd.DataFrame) -> str:
+    """
+    Genera un HTML <table> en string a partir de un DataFrame de pandas.
+    Soporta columnas simples y MultiIndex (2 niveles).
+    """
+    # Convertimos Spark DF a pandas si es necesario
+    if not isinstance(report, pd.DataFrame):
+        df = report.select("*").toPandas()
+    else:
+        df = report.copy()
+
+    str_list = []
+
+    # Inicio de tabla y título
+    str_list.append('<table width="100%" style="width:100%;font-family:Verdana, Arial, Helvetica, sans-serif; border-collapse: collapse;" border="1">')
+    str_list.append(f'<tr><th colspan="{len(df.columns)}" style="background-color:#003746;color:#fff;text-align:left;padding:8px;">{report_name}</th></tr>')
+
+    # --- Construcción de THEAD ---
+    str_list.append('<thead>')
+
+    if isinstance(df.columns, pd.MultiIndex):
+        # Nivel 1: categorías
+        str_list.append('<tr>')
+        seen = []
+        for cat in df.columns.get_level_values(0):
+            if cat not in seen:
+                seen.append(cat)
+                span = sum(1 for c in df.columns.get_level_values(0) if c == cat)
+                display = cat if cat != '' else '&nbsp;'
+                str_list.append(
+                    f'<th colspan="{span}" style="background-color:#f2f2f2;color:#003746;padding:4px;">{display}</th>'
+                )
+        str_list.append('</tr>')
+
+        # Nivel 2: métricas
+        str_list.append('<tr>')
+        for _, metric in df.columns:
+            str_list.append(
+                f'<th style="background-color:#f2f2f2;color:#003746;padding:4px;">{metric}</th>'
+            )
+        str_list.append('</tr>')
+
+    else:
+        # Encabezado simple
+        str_list.append('<tr style="background-color:#f2f2f2;color:#003746;">')
+        for col in df.columns:
+            str_list.append(f'<th style="padding:4px;">{col}</th>')
+        str_list.append('</tr>')
+
+    str_list.append('</thead>')
+
+    # --- Construcción de TBODY ---
+    str_list.append('<tbody>')
+    for _, row in df.iterrows():
+        str_list.append('<tr>')
+        for col in df.columns:
+            val = row[col]
+            # ejemplo de coloreado sencillo: rojo si >400, amarillo si <200
+            style = 'padding:4px;text-align:center;'
+            try:
+                num = float(val)
+                if num > 400:
+                    style += 'background-color:#f8d7da;'
+                elif num < 200:
+                    style += 'background-color:#fff3cd;'
+            except:
+                pass
+            str_list.append(f'<td style="{style}">{val}</td>')
+        str_list.append('</tr>')
+    str_list.append('</tbody>')
+
+    # Cierre de tabla
+    str_list.append('</table>')
+
+    return "\n".join(str_list)
