@@ -1870,3 +1870,136 @@ with open("main.py", "r", encoding=result["encoding"]) as f:
 with open("main_utf8.py", "w", encoding="utf-8") as f:
     f.write(content)
 
+
+import pandas as pd
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def generar_df_multinivel(datos):
+    """
+    Recibe una lista de diccionarios con llaves:
+      'SOEID', 'NOMBRE',
+      'AHT','ADHERENCIA','AD TOTAL','CONEXION','%_AD_TOTAL',
+      'NPS','FCR','RESOLUCION','RSAT','IES','TotalEncuestas','Promotor','Pasivo','Detractor',
+      'FALTAS','RETARDOS',
+      'Calificacion%'
+    y devuelve un DataFrame con MultiIndex en columnas.
+    """
+    # 1) Define tu MultiIndex de columnas
+    cols = pd.MultiIndex.from_tuples(
+        [
+            ('','SOEID'),     ('','NOMBRE'),
+            ('NICE','AHT'),   ('NICE','ADHERENCIA'),
+            ('NICE','AD TOTAL'), ('NICE','CONEXION'),
+            ('NICE','% AD TOTAL'),
+            ('QUALTRICS','NPS'),   ('QUALTRICS','FCR'),
+            ('QUALTRICS','RESOLUCION'), ('QUALTRICS','RSAT'),
+            ('QUALTRICS','IES'),   ('QUALTRICS','TotalEncuestas'),
+            ('QUALTRICS','Promotor'), ('QUALTRICS','Pasivo'),
+            ('QUALTRICS','Detractor'),
+            ('Asistencia','FALTAS'), ('Asistencia','RETARDOS'),
+            ('','Calificacion %')
+        ],
+        names=['Categoría','Métrica']
+    )
+    # 2) Convierte la lista de dicts a DataFrame “plano”
+    plano = pd.DataFrame(datos)
+    # 3) Reordena las columnas según el MultiIndex
+    #    (el dict `mapeo` vincula nombre plano → tupla del MultiIndex)
+    mapeo = {
+        'SOEID':         ('','SOEID'),
+        'NOMBRE':        ('','NOMBRE'),
+        'AHT':           ('NICE','AHT'),
+        'ADHERENCIA':    ('NICE','ADHERENCIA'),
+        'AD_TOTAL':      ('NICE','AD TOTAL'),
+        'CONEXION':      ('NICE','CONEXION'),
+        'PCT_AD_TOTAL':  ('NICE','% AD TOTAL'),
+        'NPS':           ('QUALTRICS','NPS'),
+        'FCR':           ('QUALTRICS','FCR'),
+        'RESOLUCION':    ('QUALTRICS','RESOLUCION'),
+        'RSAT':          ('QUALTRICS','RSAT'),
+        'IES':           ('QUALTRICS','IES'),
+        'TotalEncuestas':('QUALTRICS','TotalEncuestas'),
+        'Promotor':      ('QUALTRICS','Promotor'),
+        'Pasivo':        ('QUALTRICS','Pasivo'),
+        'Detractor':     ('QUALTRICS','Detractor'),
+        'FALTAS':        ('Asistencia','FALTAS'),
+        'RETARDOS':      ('Asistencia','RETARDOS'),
+        'Calificacion%': ('','Calificacion %'),
+    }
+    # Construimos el DataFrame final con columnas MultiIndex
+    df = pd.DataFrame(
+        plano[list(mapeo.keys())].values,
+        columns=cols
+    )
+    return df
+
+def enviar_email_con_tabla(df, asunto, destinatarios,
+                           smtp_host, smtp_puerto,
+                           smtp_user, smtp_pass,
+                           remitente):
+    """
+    Envía un correo HTML con el DataFrame formateado.
+    """
+    # 1) Convierte DataFrame a HTML (sin índice)
+    html_tabla = df.to_html(border=1, index=False, justify='center')
+
+    # 2) Prepara el mensaje
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = asunto
+    msg['From']    = remitente
+    msg['To']      = ', '.join(destinatarios)
+
+    # Opcional: un pequeño CSS inline para estilizar
+    html_body = f"""
+    <html>
+      <head>
+        <style>
+          table {{ border-collapse: collapse; font-family: Arial, sans-serif; }}
+          th, td {{ padding: 4px 8px; text-align: center; border: 1px solid #666; }}
+          th {{ background-color: #ddd; }}
+        </style>
+      </head>
+      <body>
+        <p>Adjunto encontrarás el reporte:</p>
+        {html_tabla}
+      </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(html_body, 'html'))
+
+    # 3) Envía por SMTP
+    with smtplib.SMTP(smtp_host, smtp_puerto) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(remitente, destinatarios, msg.as_string())
+
+# ——— Ejemplo de uso ———
+if __name__ == "__main__":
+    # Datos de ejemplo (lista de dicts)
+    datos = [
+        {
+          'SOEID':'001','NOMBRE':'Ana Pérez',
+          'AHT':300,'ADHERENCIA':95,'AD_TOTAL':5,'CONEXION':99,'PCT_AD_TOTAL':'0.00%',
+          'NPS':10,'FCR':80,'RESOLUCION':90,'RSAT':85,'IES':4.5,'TotalEncuestas':20,
+          'Promotor':12,'Pasivo':5,'Detractor':3,
+          'FALTAS':0,'RETARDOS':1,'Calificacion%':'95.0%'
+        },
+        # … más filas …
+    ]
+
+    df = generar_df_multinivel(datos)
+
+    enviar_email_con_tabla(
+        df,
+        asunto="Reporte NICE/QUALTRICS",
+        destinatarios=["destino@ejemplo.com"],
+        smtp_host="smtp.tuempresa.com",
+        smtp_puerto=587,
+        smtp_user="usuario",
+        smtp_pass="contraseña",
+        remitente="reportes@tuempresa.com"
+    )
+
