@@ -2348,3 +2348,189 @@ if __name__ == "__main__":
         high_threshold=400,
         low_threshold=200
     )
+
+
+
+#!/usr/bin/env python3
+import pandas as pd
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def generar_df_multinivel(datos):
+    """
+    Convierte una lista de dicts 'datos' a un DataFrame con MultiIndex en columnas.
+    Cada dict debe tener las claves:
+      'SOEID','NOMBRE','AHT','ADHERENCIA','AD_TOTAL','CONEXION','PCT_AD_TOTAL',
+      'NPS','FCR','RESOLUCION','RSAT','IES','TotalEncuestas','Promotor','Pasivo',
+      'Detractor','FALTAS','RETARDOS','Calificacion%'
+    """
+    cols = pd.MultiIndex.from_tuples([
+        ('','SOEID'),     ('','NOMBRE'),
+        ('NICE','AHT'),   ('NICE','ADHERENCIA'),
+        ('NICE','AD TOTAL'), ('NICE','CONEXION'),
+        ('NICE','% AD TOTAL'),
+        ('QUALTRICS','NPS'),   ('QUALTRICS','FCR'),
+        ('QUALTRICS','RESOLUCION'), ('QUALTRICS','RSAT'),
+        ('QUALTRICS','IES'),   ('QUALTRICS','TotalEncuestas'),
+        ('QUALTRICS','Promotor'), ('QUALTRICS','Pasivo'),
+        ('QUALTRICS','Detractor'),
+        ('Asistencia','FALTAS'), ('Asistencia','RETARDOS'),
+        ('','Calificacion %')
+    ], names=['Categoría','Métrica'])
+
+    plano = pd.DataFrame(datos)
+    mapeo = {
+        'SOEID':('','SOEID'),        'NOMBRE':('','NOMBRE'),
+        'AHT':('NICE','AHT'),        'ADHERENCIA':('NICE','ADHERENCIA'),
+        'AD_TOTAL':('NICE','AD TOTAL'),'CONEXION':('NICE','CONEXION'),
+        'PCT_AD_TOTAL':('NICE','% AD TOTAL'),
+        'NPS':('QUALTRICS','NPS'),    'FCR':('QUALTRICS','FCR'),
+        'RESOLUCION':('QUALTRICS','RESOLUCION'),'RSAT':('QUALTRICS','RSAT'),
+        'IES':('QUALTRICS','IES'),    'TotalEncuestas':('QUALTRICS','TotalEncuestas'),
+        'Promotor':('QUALTRICS','Promotor'),'Pasivo':('QUALTRICS','Pasivo'),
+        'Detractor':('QUALTRICS','Detractor'),
+        'FALTAS':('Asistencia','FALTAS'),'RETARDOS':('Asistencia','RETARDOS'),
+        'Calificacion%':('','Calificacion %'),
+    }
+
+    df = pd.DataFrame(
+        plano[list(mapeo.keys())].values,
+        columns=cols
+    )
+    return df
+
+def generar_html_coloreado(
+    df: pd.DataFrame,
+    high_threshold: float = 400,
+    low_threshold:  float = 200
+) -> str:
+    """
+    Genera un HTML completo de la tabla con:
+      - dos niveles de encabezado (MultiIndex)
+      - celdas > high_threshold en rojo suave
+      - celdas < low_threshold  en amarillo suave
+      - todo inline, sin usar Styler ni Jinja2.
+    """
+    html = []
+    # inicio de tabla con estilo general
+    html.append('<table border="1" cellpadding="4" '
+                'style="border-collapse: collapse; font-family: Arial, sans-serif;">')
+
+    # --- encabezados ---
+    html.append('<thead>')
+    # fila 1: categorías
+    html.append('<tr>')
+    seen = []
+    cats = []
+    for cat in df.columns.get_level_values(0):
+        if cat not in seen:
+            seen.append(cat)
+            cats.append(cat)
+    for cat in cats:
+        span = sum(1 for c in df.columns.get_level_values(0) if c == cat)
+        html.append(f'<th colspan="{span}" '
+                    f'style="background-color:#ddd; text-align:center;">{cat}</th>')
+    html.append('</tr>')
+
+    # fila 2: métricas
+    html.append('<tr>')
+    for sub in df.columns.get_level_values(1):
+        html.append(f'<th style="background-color:#ddd; text-align:center;">{sub}</th>')
+    html.append('</tr>')
+    html.append('</thead>')
+
+    # --- cuerpo de datos ---
+    html.append('<tbody>')
+    for _, row in df.iterrows():
+        html.append('<tr>')
+        for col in df.columns:
+            v = row[col]
+            # aplicamos color de fondo según umbrales
+            style = 'text-align:center;'
+            try:
+                num = float(v)
+                if num > high_threshold:
+                    style += 'background-color:#f8d7da;'
+                elif num < low_threshold:
+                    style += 'background-color:#fff3cd;'
+            except (ValueError, TypeError):
+                pass
+            html.append(f'<td style="{style}">{v}</td>')
+        html.append('</tr>')
+    html.append('</tbody>')
+
+    html.append('</table>')
+    return ''.join(html)
+
+def enviar_email_con_tabla(
+    df: pd.DataFrame,
+    asunto: str,
+    destinatarios: list,
+    smtp_host: str,
+    smtp_puerto: int,
+    smtp_user: str,
+    smtp_pass: str,
+    remitente: str,
+    high_threshold: float = 400,
+    low_threshold:  float = 200
+):
+    """
+    Envía un correo HTML con la tabla generada por generar_html_coloreado.
+    """
+    html_tabla = generar_html_coloreado(df, high_threshold, low_threshold)
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = asunto
+    msg['From']    = remitente
+    msg['To']      = ', '.join(destinatarios)
+
+    html_body = f"""
+    <html>
+      <head></head>
+      <body>
+        <p>Adjunto encontrarás el reporte:</p>
+        {html_tabla}
+      </body>
+    </html>
+    """
+    msg.attach(MIMEText(html_body, 'html'))
+
+    with smtplib.SMTP(smtp_host, smtp_puerto) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(remitente, destinatarios, msg.as_string())
+
+if __name__ == "__main__":
+    # — Ejemplo de datos —
+    datos = [
+        {
+          'SOEID':'001','NOMBRE':'Ana Pérez',
+          'AHT':300,'ADHERENCIA':95,'AD_TOTAL':5,'CONEXION':99,'PCT_AD_TOTAL':0,
+          'NPS':10,'FCR':80,'RESOLUCION':90,'RSAT':85,'IES':4.5,'TotalEncuestas':20,
+          'Promotor':12,'Pasivo':5,'Detractor':3,
+          'FALTAS':0,'RETARDOS':1,'Calificacion%':95
+        },
+        {
+          'SOEID':'002','NOMBRE':'Luis Gómez',
+          'AHT':420,'ADHERENCIA':88,'AD_TOTAL':6,'CONEXION':97,'PCT_AD_TOTAL':0,
+          'NPS':55,'FCR':82,'RESOLUCION':92,'RSAT':88,'IES':4.7,'TotalEncuestas':25,
+          'Promotor':15,'Pasivo':7,'Detractor':3,
+          'FALTAS':1,'RETARDOS':0,'Calificacion%':92
+        },
+    ]
+
+    df = generar_df_multinivel(datos)
+
+    enviar_email_con_tabla(
+        df=df,
+        asunto="Reporte NICE/QUALTRICS",
+        destinatarios=["destino@ejemplo.com"],
+        smtp_host="smtp.tuempresa.com",
+        smtp_puerto=587,
+        smtp_user="usuario",
+        smtp_pass="contraseña",
+        remitente="reportes@tuempresa.com",
+        high_threshold=400,
+        low_threshold=200
+    )
