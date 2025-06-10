@@ -2003,3 +2003,176 @@ if __name__ == "__main__":
         remitente="reportes@tuempresa.com"
     )
 
+#!/usr/bin/env python3
+import pandas as pd
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+def generar_df_multinivel(datos):
+    """
+    Recibe una lista de diccionarios con llaves:
+      'SOEID', 'NOMBRE',
+      'AHT','ADHERENCIA','AD_TOTAL','CONEXION','PCT_AD_TOTAL',
+      'NPS','FCR','RESOLUCION','RSAT','IES','TotalEncuestas','Promotor','Pasivo','Detractor',
+      'FALTAS','RETARDOS',
+      'Calificacion%'
+    y devuelve un DataFrame con MultiIndex en columnas.
+    """
+    # 1) Define tu MultiIndex de columnas
+    cols = pd.MultiIndex.from_tuples([
+        ('','SOEID'),     ('','NOMBRE'),
+        ('NICE','AHT'),   ('NICE','ADHERENCIA'),
+        ('NICE','AD TOTAL'), ('NICE','CONEXION'),
+        ('NICE','% AD TOTAL'),
+        ('QUALTRICS','NPS'),   ('QUALTRICS','FCR'),
+        ('QUALTRICS','RESOLUCION'), ('QUALTRICS','RSAT'),
+        ('QUALTRICS','IES'),   ('QUALTRICS','TotalEncuestas'),
+        ('QUALTRICS','Promotor'), ('QUALTRICS','Pasivo'),
+        ('QUALTRICS','Detractor'),
+        ('Asistencia','FALTAS'), ('Asistencia','RETARDOS'),
+        ('','Calificacion %')
+    ], names=['Categoría','Métrica'])
+
+    # 2) Convierte la lista de dicts a DataFrame “plano”
+    plano = pd.DataFrame(datos)
+
+    # 3) Mapeo de columnas planas a MultiIndex
+    mapeo = {
+        'SOEID':         ('','SOEID'),
+        'NOMBRE':        ('','NOMBRE'),
+        'AHT':           ('NICE','AHT'),
+        'ADHERENCIA':    ('NICE','ADHERENCIA'),
+        'AD_TOTAL':      ('NICE','AD TOTAL'),
+        'CONEXION':      ('NICE','CONEXION'),
+        'PCT_AD_TOTAL':  ('NICE','% AD TOTAL'),
+        'NPS':           ('QUALTRICS','NPS'),
+        'FCR':           ('QUALTRICS','FCR'),
+        'RESOLUCION':    ('QUALTRICS','RESOLUCION'),
+        'RSAT':          ('QUALTRICS','RSAT'),
+        'IES':           ('QUALTRICS','IES'),
+        'TotalEncuestas':('QUALTRICS','TotalEncuestas'),
+        'Promotor':      ('QUALTRICS','Promotor'),
+        'Pasivo':        ('QUALTRICS','Pasivo'),
+        'Detractor':     ('QUALTRICS','Detractor'),
+        'FALTAS':        ('Asistencia','FALTAS'),
+        'RETARDOS':      ('Asistencia','RETARDOS'),
+        'Calificacion%': ('','Calificacion %'),
+    }
+
+    # 4) Construimos el DataFrame final con columnas MultiIndex
+    df = pd.DataFrame(
+        plano[list(mapeo.keys())].values,
+        columns=cols
+    )
+    return df
+
+def enviar_email_con_tabla(
+    df: pd.DataFrame,
+    asunto: str,
+    destinatarios: list[str],
+    smtp_host: str,
+    smtp_puerto: int,
+    smtp_user: str,
+    smtp_pass: str,
+    remitente: str,
+    high_threshold: float = 400,
+    low_threshold:  float = 200
+):
+    """
+    Envía un correo HTML con el DataFrame formateado y coloreado condicionalmente:
+      • celdas > high_threshold → fondo rojo tenue
+      • celdas < low_threshold  → fondo amarillo tenue
+      • resto de valores: sin color
+    """
+    # 1) Función de estilo para cada celda
+    def color_metrics(val):
+        try:
+            v = float(val)
+        except (ValueError, TypeError):
+            return ''
+        if v > high_threshold:
+            return 'background-color: #f8d7da;'  # rojo suave
+        if v < low_threshold:
+            return 'background-color: #fff3cd;'  # amarillo suave
+        return ''
+
+    # 2) Seleccionamos únicamente las columnas numéricas (para no colorear ID/nombres)
+    numeric_cols = [
+        col for col in df.columns
+        if pd.api.types.is_numeric_dtype(df[col])
+    ]
+
+    # 3) Creamos el Styler con borde, centrado y aplicamos coloreado condicional
+    styler = (
+        df.style
+          .set_table_attributes('border="1" cellpadding="4"')
+          .set_table_styles([
+              {"selector": "th", "props": "background-color: #ddd; font-weight: bold;"},
+              {"selector": "td", "props": "text-align: center;"},
+          ])
+          .applymap(color_metrics, subset=pd.IndexSlice[:, numeric_cols])
+    )
+
+    # 4) Generamos el HTML completo con estilos inline
+    html_tabla = styler.render()
+
+    # 5) Montamos el correo MIME HTML
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = asunto
+    msg['From']    = remitente
+    msg['To']      = ', '.join(destinatarios)
+
+    html_body = f"""
+    <html>
+      <head></head>
+      <body>
+        <p>Adjunto encontrarás el reporte:</p>
+        {html_tabla}
+      </body>
+    </html>
+    """
+    msg.attach(MIMEText(html_body, 'html'))
+
+    # 6) Envío por SMTP
+    with smtplib.SMTP(smtp_host, smtp_puerto) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(remitente, destinatarios, msg.as_string())
+
+if __name__ == "__main__":
+    # — Datos de ejemplo —
+    datos = [
+        {
+          'SOEID':'001','NOMBRE':'Ana Pérez',
+          'AHT':300,'ADHERENCIA':95,'AD_TOTAL':5,'CONEXION':99,'PCT_AD_TOTAL':0,
+          'NPS':10,'FCR':80,'RESOLUCION':90,'RSAT':85,'IES':4.5,'TotalEncuestas':20,
+          'Promotor':12,'Pasivo':5,'Detractor':3,
+          'FALTAS':0,'RETARDOS':1,'Calificacion%':95
+        },
+        {
+          'SOEID':'002','NOMBRE':'Luis Gómez',
+          'AHT':420,'ADHERENCIA':88,'AD_TOTAL':6,'CONEXION':97,'PCT_AD_TOTAL':0,
+          'NPS':55,'FCR':82,'RESOLUCION':92,'RSAT':88,'IES':4.7,'TotalEncuestas':25,
+          'Promotor':15,'Pasivo':7,'Detractor':3,
+          'FALTAS':1,'RETARDOS':0,'Calificacion%':92
+        },
+        # … más filas si deseas …
+    ]
+
+    # 1) Generamos el DataFrame con MultiIndex
+    df = generar_df_multinivel(datos)
+
+    # 2) Enviamos el correo (ajusta parámetros SMTP y destinatarios)
+    enviar_email_con_tabla(
+        df=df,
+        asunto="Reporte NICE/QUALTRICS",
+        destinatarios=["destino@ejemplo.com"],
+        smtp_host="smtp.tuempresa.com",
+        smtp_puerto=587,
+        smtp_user="usuario",
+        smtp_pass="contraseña",
+        remitente="reportes@tuempresa.com",
+        high_threshold=400,  # >400 → rojo
+        low_threshold=200    # <200 → amarillo
+    )
