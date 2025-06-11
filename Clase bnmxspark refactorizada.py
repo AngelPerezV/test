@@ -2729,3 +2729,24 @@ def ReportFrame(
     # --- Cierre de tabla ---
     str_list.append('</table>')
     return "\n".join(str_list)
+
+
+# Defino mis colores
+cat_colors = {
+    'NICE':      '#e0f7fa',
+    'QUALTRICS': '#ffe0b2',
+    'Asistencia':'#e1bee7'
+}
+met_colors = {
+    'AHT':            '#c8e6c9',
+    'ADHERENCIA':     '#ffecb3',
+    'NPS':            '#ffcdd2',
+    'Calificacion %': '#d1c4e9'
+}
+# Genero el HTML
+html = ReportFrame(
+    "Mi Reporte",
+    df,                      # tu pandas DataFrame con MultiIndex
+    category_colors=cat_colors,
+    metric_colors=met_colors
+)
