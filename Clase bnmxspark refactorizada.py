@@ -2612,3 +2612,120 @@ def ReportFrame(report_name: str, report: pd.DataFrame) -> str:
     str_list.append('</table>')
 
     return "\n".join(str_list)
+import pandas as pd
+
+def ReportFrame(
+    report_name: str,
+    report: pd.DataFrame,
+    category_colors: dict[str,str] = None,
+    metric_colors:   dict[str,str] = None
+) -> str:
+    """
+    Genera un HTML <table> en string a partir de un DataFrame de pandas,
+    soporta columnas simples y MultiIndex (2 niveles), y permite
+    pasar colores de fondo por categoría o por métrica:
+    
+      category_colors = {
+        'NICE':      '#e0f7fa',
+        'QUALTRICS': '#ffe0b2',
+        'Asistencia':'#e1bee7'
+      }
+      
+      metric_colors = {
+        'AHT':       '#c8e6c9',
+        'NPS':       '#ffcdd2',
+        'Calificacion %':'#d1c4e9'
+      }
+    """
+    # 1) A pandas DF
+    if not isinstance(report, pd.DataFrame):
+        df = report.select("*").toPandas()
+    else:
+        df = report.copy()
+
+    # Diccionarios de colores por defecto
+    category_colors = category_colors or {}
+    metric_colors   = metric_colors   or {}
+
+    str_list = []
+    # --- Inicio de tabla y título ---
+    str_list.append(
+        '<table width="100%" style="border-collapse: collapse; '
+        'font-family:Verdana, Arial, Helvetica, sans-serif;" border="1">'
+    )
+    # Fila de título completo
+    str_list.append(
+        f'<tr><th colspan="{len(df.columns)}" '
+        'style="background-color:#003746;color:#fff;'
+        'text-align:left;padding:8px;">'
+        f'{report_name}</th></tr>'
+    )
+
+    # --- THEAD ---
+    str_list.append('<thead>')
+    if isinstance(df.columns, pd.MultiIndex):
+        # Nivel 1: categorías
+        str_list.append('<tr>')
+        seen = []
+        for cat in df.columns.get_level_values(0):
+            if cat not in seen:
+                seen.append(cat)
+                span = sum(1 for c in df.columns.get_level_values(0) if c == cat)
+                # el color para esta categoría (o default)
+                bg = category_colors.get(cat, '#f2f2f2')
+                display = cat if cat != '' else '&nbsp;'
+                str_list.append(
+                    f'<th colspan="{span}" '
+                    f'style="background-color:{bg};'
+                    'color:#003746;padding:4px;border:1px solid #666;">'
+                    f'{display}</th>'
+                )
+        str_list.append('</tr>')
+
+        # Nivel 2: métricas
+        str_list.append('<tr>')
+        for _, metric in df.columns:
+            bg = metric_colors.get(metric, '#f2f2f2')
+            str_list.append(
+                f'<th style="background-color:{bg};'
+                'color:#003746;padding:4px;border:1px solid #666;">'
+                f'{metric}</th>'
+            )
+        str_list.append('</tr>')
+
+    else:
+        # Encabezado simple
+        str_list.append('<tr>')
+        for col in df.columns:
+            bg = metric_colors.get(col, '#f2f2f2')
+            str_list.append(
+                f'<th style="background-color:{bg};'
+                'color:#003746;padding:4px;border:1px solid #666;">'
+                f'{col}</th>'
+            )
+        str_list.append('</tr>')
+    str_list.append('</thead>')
+
+    # --- TBODY con coloreado condicional de datos (opcional) ---
+    str_list.append('<tbody>')
+    for _, row in df.iterrows():
+        str_list.append('<tr>')
+        for col in df.columns:
+            val = row[col]
+            style = 'padding:4px;text-align:center;border:1px solid #666;'
+            # ejemplo: colorear datos si >400 rojo, <200 amarillo
+            try:
+                num = float(val)
+                if num > 400:
+                    style += 'background-color:#f8d7da;'
+                elif num < 200:
+                    style += 'background-color:#fff3cd;'
+            except:
+                pass
+            str_list.append(f'<td style="{style}">{val}</td>')
+        str_list.append('</tr>')
+    str_list.append('</tbody>')
+
+    # --- Cierre de tabla ---
+    str_list.append('</table>')
+    return "\n".join(str_list)
