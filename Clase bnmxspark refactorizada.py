@@ -2750,3 +2750,86 @@ html = ReportFrame(
     category_colors=cat_colors,
     metric_colors=met_colors
 )
+
+
+
+def pandas_to_spark(self,
+                    pandas_df: pd.DataFrame,
+                    temp_view_name: str = None):
+    """
+    Convierte un DataFrame de pandas a un DataFrame de Spark,
+    manejando explícitamente pandas.Timestamp, NaT y demás tipos.
+    """
+    # 1) Reemplazamos NaN y NaT por None
+    df_clean = pandas_df.copy()
+    # pd.isna detecta NaN y NaT
+    df_clean = df_clean.where(~pd.isna(df_clean), None)
+
+    # 2) Inferimos esquema a partir de un DF vacío
+    schema = self.spark.createDataFrame(df_clean.head(0)).schema
+
+    # 3) Armamos la lista de dicts para crear el DF de Spark
+    records = []
+    for row in df_clean.to_dict(orient="records"):
+        rec = {}
+        for field in schema.fields:
+            name  = field.name
+            dtype = field.dataType
+            val   = row.get(name)
+
+            # nulos genéricos
+            if val is None:
+                rec[name] = None
+
+            # enteros
+            elif isinstance(dtype, (IntegerType, LongType)):
+                try:
+                    rec[name] = int(val)
+                except (ValueError, TypeError):
+                    rec[name] = None
+
+            # floats
+            elif isinstance(dtype, (FloatType, DoubleType)):
+                try:
+                    rec[name] = float(val)
+                except (ValueError, TypeError):
+                    rec[name] = None
+
+            # booleanos
+            elif isinstance(dtype, BooleanType):
+                rec[name] = bool(val)
+
+            # timestamps
+            elif isinstance(dtype, TimestampType):
+                # val aquí ya no puede ser pd.NaT, pero por si acaso:
+                if val is None:
+                    rec[name] = None
+                # pandas.Timestamp → datetime.datetime
+                elif isinstance(val, pd.Timestamp):
+                    rec[name] = val.to_pydatetime()
+                # datetime.datetime
+                elif isinstance(val, datetime):
+                    rec[name] = val
+                # string ISO
+                elif isinstance(val, str):
+                    try:
+                        rec[name] = datetime.fromisoformat(val)
+                    except ValueError:
+                        rec[name] = None
+                else:
+                    rec[name] = None
+
+            # resto de tipos (string, etc.)
+            else:
+                rec[name] = str(val)
+
+        records.append(rec)
+
+    # 4) Finalmente creamos el DataFrame de Spark
+    spark_df = self.spark.createDataFrame(records, schema=schema)
+
+    # 5) (Opcional) registramos vista temporal
+    if temp_view_name:
+        spark_df.createOrReplaceTempView(temp_view_name)
+
+    return spark_df
