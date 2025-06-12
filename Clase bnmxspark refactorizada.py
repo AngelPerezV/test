@@ -3103,6 +3103,9 @@ if (-not (Test-Path $outputDir)) {
                                                                                                                                                                                                                                                                                                                                                                                     Write-Host "`n¡Listo! Revisa la carpeta de salida:`n$outputDir"              
 
 
+
+
+
                                                                     # concat_por_fecha_utf8.ps1
                                                                     # 
                                                                     # 1) Carpeta de trabajo y de salida
@@ -3153,4 +3156,58 @@ if (-not (Test-Path $outputDir)) {
                                                                                                                                                                                                                                                                                                                                                                                                                                                       }
                                                                                                                                                                                                                                                                                                                                                                                                                                                         }
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        Write-Host "`n¡Listo! Revisa la carpeta de salida:`n$outputDir"                                                                                                                                                  
+
+
+
+
+
+
+# concat_por_fecha_utf8bom.ps1
+# 
+# 1) Carpeta de trabajo y de salida
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path
+$outputDir = Join-Path $scriptDir 'salida'
+if (-not (Test-Path $outputDir)) {
+    New-Item -ItemType Directory -Path $outputDir | Out-Null
+    }
+    
+    # 2) Agrupar archivos *_DDMMYYYY.txt por fecha
+    Get-ChildItem -Path $scriptDir -Filter '*_????????.txt' |
+      Group-Object -Property {
+            if ($_.BaseName -match '_([0-9]{8})$') { $Matches[1] }
+              } |
+                Where-Object { $_.Name -ne '' } |
+                  ForEach-Object {
+                        $fecha = $_.Name
+                              $files = $_.Group
+                                    $out   = Join-Path $outputDir "concatenado_$fecha.txt"
+                                    
+                                          # Empezar de cero
+                                                if (Test-Path $out) { Remove-Item $out }
+                                                
+                                                      if ($files.Count -eq 1) {
+                                                                # Único archivo: copiar completo con BOM
+                                                                          Get-Content $files[0].FullName |
+                                                                                      Set-Content -Path $out -Encoding UTF8BOM
+                                                                                                Write-Host "► [$fecha] Un archivo — copiado en UTF8-BOM: $($files[0].Name)"
+                                                                                                      }
+                                                                                                            else {
+                                                                                                                      # Múltiples archivos: uno con encabezado + datos, luego sin encabezado
+                                                                                                                                $first = $true
+                                                                                                                                          foreach ($f in $files) {
+                                                                                                                                                        if ($first) {
+                                                                                                                                                                          Get-Content $f.FullName |
+                                                                                                                                                                                              Set-Content -Path $out -Encoding UTF8BOM
+                                                                                                                                                                                                                $first = $false
+                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                            else {
+                                                                                                                                                                                                                                                              Get-Content $f.FullName |
+                                                                                                                                                                                                                                                                                  Select-Object -Skip 1 |
+                                                                                                                                                                                                                                                                                                      Add-Content -Path $out -Encoding UTF8BOM
+                                                                                                                                                                                                                                                                                                                    }
+                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                        Write-Host "► [$fecha] Concatenados en UTF8-BOM → $out"
+                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                }
+                                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                                Write-Host "`n¡Listo! Revisa la carpeta de salida:`n$outputDir"                                                                                                                                                                                                                                                                                                                                                                                                                                                    Write-Host "`n¡Listo! Revisa la carpeta de salida:`n$outputDir"                                                                                                                                                  
