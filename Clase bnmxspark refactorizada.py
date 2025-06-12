@@ -2833,3 +2833,62 @@ def pandas_to_spark(self,
         spark_df.createOrReplaceTempView(temp_view_name)
 
     return spark_df
+
+
+@echo off
+setlocal enabledelayedexpansion
+
+REM === CONFIGURACIÓN DE VARIABLES ===
+set "ruta=C:\Datos"
+set "base_1=DAD"
+set "base_2=INFO"
+set "base_out=concatenado"
+
+REM Cambiar al directorio donde están los archivos
+cd /d "%ruta%"
+
+REM Recorrer todos los archivos que empiecen con base_1
+for %%f in ("%base_1%_*.txt") do (
+    REM Obtener el nombre sin extensión
+        set "filename=%%~nf"
+
+            REM Extraer la fecha (todo después del guión bajo "_")
+                for /f "tokens=1* delims=_" %%a in ("!filename!") do set "fecha=%%b"
+
+                    REM Construir el nombre del archivo 2
+                        set "archivo2=%base_2%_!fecha!.txt"
+                            set "archivo1=%%~nxf"
+                                set "salida=%base_out%_!fecha!.txt"
+
+                                    REM Verificar si el segundo archivo existe
+                                        if exist "!archivo2!" (
+                                                echo Concatenando !archivo1! + !archivo2! → !salida!
+
+                                                        REM Reiniciar control de encabezado
+                                                                set header=
+
+                                                                        REM Escribir encabezado y contenido de archivo1
+                                                                                for /f "delims=" %%l in ('type "!archivo1!"') do (
+                                                                                            if not defined header (
+                                                                                                            echo %%l > "!salida!"
+                                                                                                                            set header=1
+                                                                                                                                        ) else (
+                                                                                                                                                        echo %%l >> "!salida!"
+                                                                                                                                                                    )
+                                                                                                                                                                            )
+
+                                                                                                                                                                                    REM Escribir solo contenido SIN encabezado del archivo2
+                                                                                                                                                                                            set "first_line=1"
+                                                                                                                                                                                                    for /f "delims=" %%l in ('type "!archivo2!"') do (
+                                                                                                                                                                                                                if defined first_line (
+                                                                                                                                                                                                                                set "first_line="
+                                                                                                                                                                                                                                            ) else (
+                                                                                                                                                                                                                                                            echo %%l >> "!salida!"
+                                                                                                                                                                                                                                                                        )
+                                                                                                                                                                                                                                                                                )
+                                                                                                                                                                                                                                                                                    )
+                                                                                                                                                                                                                                                                                    )
+
+                                                                                                                                                                                                                                                                                    echo.
+                                                                                                                                                                                                                                                                                    echo ✅ Listo. Archivos concatenados en: %ruta%
+                                                                                                                                                                                                                                                                                    pause
