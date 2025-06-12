@@ -2892,3 +2892,126 @@ for %%f in ("%base_1%_*.txt") do (
                                                                                                                                                                                                                                                                                     echo.
                                                                                                                                                                                                                                                                                     echo ✅ Listo. Archivos concatenados en: %ruta%
                                                                                                                                                                                                                                                                                     pause
+
+                                                                                        @echo off
+                                                                                        setlocal enabledelayedexpansion
+
+                                                                                        REM ————— Ajusta aquí tu carpeta de destino —————
+                                                                                        set "OUTPUT_DIR=C:\Ruta\De\Salida"
+                                                                                        if not exist "%OUTPUT_DIR%" md "%OUTPUT_DIR%"
+
+                                                                                        REM ————— Tus prefijos —————
+                                                                                        set "PREFIX1=L533.hsgs_hshs"
+                                                                                        set "PREFIX2=L533.hshsh_ysus"
+
+                                                                                        for /f "tokens=3 delims=_" %%A in ('
+                                                                                            dir /b "%PREFIX1%_????????.txt" "%PREFIX2%_????????.txt"
+                                                                                            ') do (
+                                                                                                set "filedate=%%~A"
+                                                                                                    set "filedate=!filedate:~0,8!"
+                                                                                                        if not defined processed_!filedate! (
+                                                                                                                set "processed_!filedate!=1"
+                                                                                                                        REM Aquí usamos OUTPUT_DIR
+                                                                                                                                set "outfile=%OUTPUT_DIR%\concatenado_!filedate!.txt"
+                                                                                                                                        if exist "!outfile!" del /q "!outfile!"
+
+                                                                                                                                                set "first=1"
+                                                                                                                                                        for %%P in ("%PREFIX1%_!filedate!.txt" "%PREFIX2%_!filedate!.txt") do (
+                                                                                                                                                                    if exist "%%~P" (
+                                                                                                                                                                                    if !first! equ 1 (
+                                                                                                                                                                                                        type "%%~P" > "!outfile!"
+                                                                                                                                                                                                                            set "first=0"
+                                                                                                                                                                                                                                            ) else (
+                                                                                                                                                                                                                                                                more +1 "%%~P" >> "!outfile!"
+                                                                                                                                                                                                                                                                                )
+                                                                                                                                                                                                                                                                                            )
+                                                                                                                                                                                                                                                                                                    )
+                                                                                                                                                                                                                                                                                                            echo Procesado fecha !filedate!: creado "!outfile!"
+                                                                                                                                                                                                                                                                                                                )
+                                                                                                                                                                                                                                                                                                                )
+
+                                                                                                                                                                                                                                                                                                                echo.
+                                                                                                                                                                                                                                                                                                                echo *** Listo: archivos en %OUTPUT_DIR% ***
+                                                                                                                                                                                                                                                                                                                
+@echo off
+setlocal enabledelayedexpansion
+
+REM ————— Ajusta aquí tu carpeta de destino —————
+set "OUTPUT_DIR=C:\Ruta\De\Salida"
+if not exist "%OUTPUT_DIR%" md "%OUTPUT_DIR%"
+
+REM ————— Tus prefijos —————
+set "PREFIX1=L533.hsgs_hshs"
+set "PREFIX2=L533.hshsh_ysus"
+
+for /f "tokens=3 delims=_" %%A in ('
+    dir /b "%PREFIX1%_????????.txt" "%PREFIX2%_????????.txt"
+    ') do (
+        set "filedate=%%~A"
+            set "filedate=!filedate:~0,8!"
+                if not defined processed_!filedate! (
+                        set "processed_!filedate!=1"
+                                REM Aquí usamos OUTPUT_DIR
+                                        set "outfile=%OUTPUT_DIR%\concatenado_!filedate!.txt"
+                                                if exist "!outfile!" del /q "!outfile!"
+
+                                                        set "first=1"
+                                                                for %%P in ("%PREFIX1%_!filedate!.txt" "%PREFIX2%_!filedate!.txt") do (
+                                                                            if exist "%%~P" (
+                                                                                            if !first! equ 1 (
+                                                                                                                type "%%~P" > "!outfile!"
+                                                                                                                                    set "first=0"
+                                                                                                                                                    ) else (
+                                                                                                                                                                        more +1 "%%~P" >> "!outfile!"
+                                                                                                                                                                                        )
+                                                                                                                                                                                                    )
+                                                                                                                                                                                                            )
+                                                                                                                                                                                                                    echo Procesado fecha !filedate!: creado "!outfile!"
+                                                                                                                                                                                                                        )
+                                                                                                                                                                                                                        )
+
+                                                                                                                                                                                                                        echo.
+                                                                                                                                                                                                                        echo *** Listo: archivos en %OUTPUT_DIR% ***
+                                                                                                                                                                                                                        pause
+
+@echo off
+setlocal enabledelayedexpansion
+
+REM ————— Ajusta aquí tu carpeta de destino —————
+set "OUTPUT_DIR=C:\Ruta\De\Salida"
+if not exist "%OUTPUT_DIR%" md "%OUTPUT_DIR%"
+
+REM ————— Tus prefijos —————
+set "PREFIX1=L533.hsgs_hshs"
+set "PREFIX2=L533.hshsh_ysus"
+
+for /f "tokens=3 delims=_" %%A in ('
+    dir /b "%PREFIX1%_????????.txt" "%PREFIX2%_????????.txt"
+    ') do (
+        set "filedate=%%~A"
+            set "filedate=!filedate:~0,8!"
+                if not defined processed_!filedate! (
+                        set "processed_!filedate!=1"
+                                REM Aquí usamos OUTPUT_DIR
+                                        set "outfile=%OUTPUT_DIR%\concatenado_!filedate!.txt"
+                                                if exist "!outfile!" del /q "!outfile!"
+
+                                                        set "first=1"
+                                                                for %%P in ("%PREFIX1%_!filedate!.txt" "%PREFIX2%_!filedate!.txt") do (
+                                                                            if exist "%%~P" (
+                                                                                            if !first! equ 1 (
+                                                                                                                type "%%~P" > "!outfile!"
+                                                                                                                                    set "first=0"
+                                                                                                                                                    ) else (
+                                                                                                                                                                        more +1 "%%~P" >> "!outfile!"
+                                                                                                                                                                                        )
+                                                                                                                                                                                                    )
+                                                                                                                                                                                                            )
+                                                                                                                                                                                                                    echo Procesado fecha !filedate!: creado "!outfile!"
+                                                                                                                                                                                                                        )
+                                                                                                                                                                                                                        )
+
+                                                                                                                                                                                                                        echo.
+                                                                                                                                                                                                                        echo *** Listo: archivos en %OUTPUT_DIR% ***
+                                                                                                                                                                                                                        pause
+                                                                                                                                                                                                                        
