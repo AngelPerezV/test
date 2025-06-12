@@ -3014,4 +3014,38 @@ for /f "tokens=3 delims=_" %%A in ('
                                                                                                                                                                                                                         echo.
                                                                                                                                                                                                                         echo *** Listo: archivos en %OUTPUT_DIR% ***
                                                                                                                                                                                                                         pause
-                                                                                                                                                                                                                        
+# concat_por_fecha.ps1
+
+# 1) Carpeta de salida (en paralelo al script)
+$scriptDir = Split-Path $MyInvocation.MyCommand.Path
+$outputDir = Join-Path $scriptDir 'salida'
+if (-not (Test-Path $outputDir)) {
+    New-Item -ItemType Directory -Path $outputDir | Out-Null
+    }
+
+    # 2) Agrupar archivos por fecha
+    Get-ChildItem -Path $scriptDir -Filter '*_????????.txt' | 
+      Group-Object -Property {
+            if ($_.BaseName -match '_([0-9]{8})$') { $Matches[1] } else { '' }
+              } | Where-Object { $_.Name -ne '' } |
+                ForEach-Object {
+                      $fecha = $_.Name
+                            $outFile = Join-Path $outputDir "concatenado_$fecha.txt"
+                                  if (Test-Path $outFile) { Remove-Item $outFile }
+
+                                        $primero = $true
+                                              foreach ($file in $_.Group) {
+                                                        if ($primero) {
+                                                                      # Copia todo (encabezado + datos)
+                                                                                    Get-Content $file.FullName | Out-File $outFile
+                                                                                                  $primero = $false
+                                                                                                            } else {
+                                                                                                                          # Omite la primera línea (encabezado) y anexa
+                                                                                                                                        Get-Content $file.FullName | Select-Object -Skip 1 | Add-Content $outFile
+                                                                                                                                                  }
+                                                                                                                                                        }
+
+                                                                                                                                                              Write-Host "► Generado:" $outFile
+                                                                                                                                                                }
+
+                                                                                                                                                                Write-Host "`n¡Listo! Todos los archivos están en '$outputDir'."
