@@ -1065,7 +1065,7 @@ def dlake_replace_test(spark, temp_view_or_df, dlake_tbl: str, partition_cols: l
         df = temp_view_or_df
     else:
         raise TypeError("temp_view_or_df debe ser un nombre de vista temporal (str) o un Spark DataFrame.")
-
+p
     # 2. Validar existencia de df
     if df is None:
         msg = f"⚠️ Advertencia: DataFrame para {temp_view_or_df} es None."
@@ -1578,3 +1578,41 @@ def DLake_Replace(self, temp_view_or_df, dlake_tbl: str, *argsv, debug_schema: b
         raise
 
     self.write_log(f"Datos insertados en [{dlake_tbl}] exitosamente ({count_df} registros).", "INFO")
+import os
+
+# === CONFIGURACIÓN ===
+ruta = r"C:\Datos"  # Cambia esto a tu carpeta de trabajo
+nombre_base_1 = "DAD"
+nombre_base_2 = "INFO"
+nombre_salida = "concatenado"
+
+# === Listar archivos en la carpeta ===
+archivos = os.listdir(ruta)
+
+# Filtrar archivos que empiezan con DAD_
+archivos_dad = [f for f in archivos if f.startswith(nombre_base_1 + "_") and f.endswith(".txt")]
+
+for archivo_dad in archivos_dad:
+    # Extraer la fecha desde el nombre del archivo (lo que está después de "_")
+        try:
+                fecha = archivo_dad.split("_")[1].replace(".txt", "")
+                    except IndexError:
+                            continue  # Si el nombre no tiene formato correcto, saltar
+
+                                archivo_info = f"{nombre_base_2}_{fecha}.txt"
+                                    path_dad = os.path.join(ruta, archivo_dad)
+                                        path_info = os.path.join(ruta, archivo_info)
+
+                                            if archivo_info in archivos:
+                                                    print(f"Concatenando {archivo_dad} + {archivo_info}")
+                                                            path_salida = os.path.join(ruta, f"{nombre_salida}_{fecha}.txt")
+
+                                                                    with open(path_salida, "w", encoding="utf-8") as salida:
+                                                                                with open(path_dad, "r", encoding="utf-8") as f1:
+                                                                                                salida.write(f1.read())
+                                                                                                            with open(path_info, "r", encoding="utf-8") as f2:
+                                                                                                                            salida.write(f2.read())
+                                                                                                                                else:
+                                                                                                                                        print(f"No se encontró {archivo_info} para la fecha {fecha}")
+
+                                                                                                                                        print("\n✅ Listo. Archivos combinados por fecha.")
