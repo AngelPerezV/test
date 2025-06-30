@@ -1673,3 +1673,57 @@ for archivo_dad in archivos_dad:
                                                                                                                                                                                                                                                                                                                                                                                                                             echo.
                                                                                                                                                                                                                                                                                                                                                                                                                             echo ✅ Listo. Archivos concatenados en: %ruta%
                                                                                                                                                                                                                                                                                                                                                                                                                             pausel
+
+
+                                                                                                                                                                                                                                          # --- PASO 1: Marcar las sesiones que tienen una fila 'pop' con '450' ---
+window_spec_idsesion = Window.partitionBy("idsesion")
+df_session_marked = df.withColumn(
+    "has_pop_450",
+    sum(when((col("service") == "pop") & (col("comments") == "450"), 1).otherwise(0)).over(window_spec_idsesion) > 0
+)
+
+# --- PASO 2: Preparar los conteos y marcadores dentro de las sesiones válidas ---
+df_relevant_rows = df_session_marked.filter(col("has_pop_450"))
+
+df_grouped = df_relevant_rows.groupBy("idsesion").agg(
+    sum(when((col("service") == "pop") & (col("comments") == "450"), 1).otherwise(0)).alias("count_pop_450"),
+    sum(when(col("service") == "otp", 1).otherwise(0)).alias("has_otp"),
+    collect_list(when(col("service") == "otp", col("comments"))).alias("otp_comments_list"),
+    sum(when(col("service") == "aut", 1).otherwise(0)).alias("has_aut"),
+    collect_list(when(col("service") == "aut", col("comments"))).alias("aut_comments_list"),
+    sum(when(~col("service").isin("pop", "otp", "aut"), 1).otherwise(0)).alias("count_other_services")
+)
+
+df_grouped = df_grouped.withColumn(
+    "otp_comment",
+    array_distinct(df_grouped["otp_comments_list"]).getItem(0)
+).withColumn(
+    "aut_comment",
+    array_distinct(df_grouped["aut_comments_list"]).getItem(0)
+).drop("otp_comments_list", "aut_comments_list")
+
+print("\nSesiones agrupadas con marcadores de patrón (antes del filtro final):")
+df_grouped.show(truncate=False)
+
+# --- PASO 3: Filtrar los grupos de idsesion que cumplen el patrón deseado ---
+df_filtered_groups = df_grouped.filter(
+    (col("count_pop_450") >= 1) &
+    (col("has_otp") >= 1) &
+    (col("count_other_services") == 0) & # No debe haber otros servicios no deseados
+    (
+        ( (col("otp_comment").isin("succes", "ok")) & (col("has_aut") == 0) ) | # OTP succes/ok Y NO hay AUT
+        ( (col("otp_comment") == "fail") & (col("has_aut") >= 1) & (col("aut_comment").isin("fail", "succes", "not_found")) ) # OTP fail Y HAY AUT válido
+    )
+).select("idsesion")
+
+print("\nIDs de sesiones que cumplen el patrón de grupo:")
+df_filtered_groups.show()
+
+# --- PASO 4: Unir los idsesion válidos con el DataFrame original y aplicar filtro de servicio/comentario ---
+final_result_df = df.join(df_filtered_groups, on="idsesion", how="inner").filter(
+    ( (col("service") == "pop") & (col("comments") == "450") ) | # Para 'pop', comments debe ser '450'
+    ( (col("service").isin("otp", "aut")) & (col("comments").isin("fail", "succes", "ok", "not_found")) ) # Para 'otp'/'aut', comments pueden ser estos
+)
+
+print("\nResultado final que cumple con el patrón de grupo y los comentarios individuales:")
+final_result_df.show(truncate=False)                                                                                                                                                                              
