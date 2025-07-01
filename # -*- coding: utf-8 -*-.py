@@ -1726,4 +1726,112 @@ final_result_df = df.join(df_filtered_groups, on="idsesion", how="inner").filter
 )
 
 print("\nResultado final que cumple con el patrón de grupo y los comentarios individuales:")
-final_result_df.show(truncate=False)                                                                                                                                                                              
+final_result_df.show(truncate=False)                
+
+
+def comment_like(column, value):
+    return column.like(f"%{value}%")
+
+# 1. Marcar cada pop 450 como un potencial inicio de segmento y asignar un 'segment_id'
+#    Usamos la columna 'timestamp' para ordenar la ventana.
+window_spec_session_order = Window.partitionBy("idsesion").orderBy("timestamp")
+
+df_segments = df.withColumn(
+    "is_pop_450_start",
+    when((col("service") == "pop") & (comment_like(col("comments"), "450")), 1).otherwise(0)
+).withColumn(
+    "segment_id",
+    sum(col("is_pop_450_start")).over(window_spec_session_order)
+).filter(col("segment_id") > 0) # Solo consideramos filas que vienen después de (o son) un pop 450
+
+print("\nDataFrame con segment_id (ordenado por timestamp):")
+df_segments.show(truncate=False)
+
+# 2. Para cada segmento, recolectar los servicios y comentarios para evaluación
+#    Agrupamos por (idsesion, segment_id)
+df_evaluated_segments = df_segments.groupBy("idsesion", "segment_id").agg(
+    first(when((col("service") == "pop") & comment_like(col("comments"), "450"), 1)).alias("segment_starts_with_pop_450"),
+    
+    collect_list(col("service")).alias("segment_services"),
+    collect_list(col("comments")).alias("segment_comments"),
+    
+    sum(when(col("service") == "otp", 1).otherwise(0)).alias("segment_has_otp"),
+    sum(when(col("service") == "aut", 1).otherwise(0)).alias("segment_has_aut"),
+    
+    first(when(col("service") == "otp", col("comments"))).alias("segment_otp_comment"),
+    first(when(col("service") == "aut", col("comments"))).alias("segment_aut_comment"),
+
+    sum(when(~col("service").isin("pop", "otp", "aut"), 1).otherwise(0)).alias("segment_count_other_services")
+)
+
+print("\nSegmentos agrupados con sus propiedades (evaluadas por timestamp):")
+df_evaluated_segments.show(truncate=False)
+
+# 3. Evaluar los patrones para CADA SEGMENTO
+df_valid_segments = df_evaluated_segments.withColumn(
+    "is_segment_valid",
+    (col("segment_starts_with_pop_450") == 1) &
+    (col("segment_count_other_services") == 0) &
+    (
+        # PATRÓN 1: OTP succes/ok (y si hay AUT, debe ser válido, pero es opcional)
+        (
+            (comment_like(col("segment_otp_comment"), "succes") | comment_like(col("segment_otp_comment"), "ok")) &
+            (col("segment_has_otp") >= 1) &
+            (
+                (col("segment_has_aut") == 0) |
+                (
+                    comment_like(col("segment_aut_comment"), "fail") |
+                    comment_like(col("segment_aut_comment"), "succes") |
+                    comment_like(col("segment_aut_comment"), "not_found") |
+                    comment_like(col("segment_aut_comment"), "authentication finished") # Agregado
+                )
+            )
+        ) |
+        # PATRÓN 2: OTP fail Y HAY AUT válido
+        (
+            comment_like(col("segment_otp_comment"), "fail") &
+            (col("segment_has_aut") >= 1) &
+            (
+                comment_like(col("segment_aut_comment"), "fail") |
+                comment_like(col("segment_aut_comment"), "succes") |
+                comment_like(col("segment_aut_comment"), "not_found") |
+                comment_like(col("segment_aut_comment"), "authentication finished") # Agregado
+            ) &
+            (col("segment_has_otp") >= 1)
+        ) |
+        # NUEVO PATRÓN 3: Solo pop con 450, sin OTP ni AUT en ESTE SEGMENTO
+        (
+            (col("segment_has_otp") == 0) &
+            (col("segment_has_aut") == 0)
+        )
+    )
+).filter(col("is_segment_valid") == True).select("idsesion", "segment_id")
+
+print("\nIDs de segmentos válidos (determinados por timestamp):")
+df_valid_segments.show(truncate=False)
+
+# 4. Obtener los idsesion únicos que tienen AL MENOS UN segmento válido
+valid_idsesions = df_valid_segments.select("idsesion").distinct()
+
+print("\nIDs de sesiones que contienen al menos un segmento válido:")
+valid_idsesions.show()
+
+# 5. Unir con el DataFrame original para obtener todas las filas de esos idsesion válidos,
+#    Y aplicar el filtro de comentarios individuales (que sigue siendo por contenido)
+
+final_result_df = df.join(valid_idsesions, on="idsesion", how="inner").filter(
+    ( (col("service") == "pop") & (comment_like(col("comments"), "450")) ) |
+    (
+        col("service").isin("otp", "aut") &
+        (
+            comment_like(col("comments"), "fail") |
+            comment_like(col("comments"), "succes") |
+            comment_like(col("comments"), "ok") |
+            comment_like(col("comments"), "not_found") |
+            comment_like(col("comments"), "authentication finished") # Agregado para AUT
+        )
+    )
+)
+
+print("\nResultado final con lógica de segmentos (usando timestamp):")
+final_result_df.show(truncate=False)
