@@ -1835,3 +1835,12 @@ final_result_df = df.join(valid_idsesions, on="idsesion", how="inner").filter(
 
 print("\nResultado final con lógica de segmentos (usando timestamp):")
 final_result_df.show(truncate=False)
+
+
+df_evaluated_segments = df_evaluated_segments.withColumn(
+    "segment_otp_comment",
+    when(size(col("otp_comments_in_segment_list")) > 0, col("otp_comments_in_segment_list").getItem(0)).otherwise(None)
+).withColumn(
+    "segment_aut_comment",
+    when(size(col("aut_comments_in_segment_list")) > 0, col("aut_comments_in_segment_list").getItem(0)).otherwise(None)
+).drop("otp_comments_in_segment_list", "aut_comments_in_segment_list")
