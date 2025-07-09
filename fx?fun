@@ -1,0 +1,160 @@
+import pandas as pd
+from pyspark.sql import DataFrame as pyspark_df
+from pyspark.sql.functions import col, regexp_replace, when
+
+class DLakeUtils: # Simulación de la clase para que el código sea ejecutable
+    def __init__(self, spark):
+        self.spark = spark
+        self.SparkPartitions = 200 # Valor de ejemplo
+
+    def write_log(self, message, level="INFO"):
+        """Función de registro de logs simulada."""
+        print(f"[{level}] {message}")
+
+    def DLake_Replace(self,
+                      temp_view_or_df,
+                      dlake_tbl: str,
+                      *argsv,
+                      debug_schema: bool = True):
+        """
+        Inserta o sobreescribe datos en una tabla Hive existente, manejando tablas particionadas.
+        Adapta automáticamente el esquema y soporta particiones,
+        aplicando un 'safe cast' para evitar el error de convertir
+        strings no numéricos a float/double/decimal.
+
+        Args:
+            temp_view_or_df: Nombre de vista temporal (str) o DataFrame de Spark.
+            dlake_tbl      : Tabla destino en formato "db.tabla".
+            *argsv         : Si se pasa cualquier argumento, usará parquet insertInto sin overwrite.
+            debug_schema   : Si True, imprime esquemas antes de insertar.
+        """
+        # 1) Obtener DataFrame de entrada
+        if isinstance(temp_view_or_df, str):
+            df = self.spark.table(temp_view_or_df)
+        elif isinstance(temp_view_or_df, pyspark_df):
+            df = temp_view_or_df
+        else:
+            raise TypeError("temp_view_or_df debe ser nombre de vista o un Spark DataFrame.")
+        if df is None:
+            raise ValueError(f"El DataFrame para {temp_view_or_df} es None.")
+
+        # 2) Validar si tiene datos
+        count_df = df.count()
+        if count_df == 0:
+            self.write_log("! Advertencia: El DataFrame está vacío. No se realizará el INSERT.", "WARNING")
+            return
+        else:
+            self.write_log(f"El DataFrame tiene {count_df} filas. Procediendo con {dlake_tbl}.", "INFO")
+
+        # 3) Leer esquema de Hive y separar columnas de datos y partición
+        # La salida de DESCRIBE para tablas particionadas es:
+        # columnas_de_datos
+        #
+        # # Partition Information
+        # # col_name            data_type           comment
+        # columnas_de_particion
+        schema_df = self.spark.sql(f"DESCRIBE {dlake_tbl}").toPandas()
+
+        data_columns_info = []
+        partition_columns_info = []
+        past_data_columns = False # Bandera para saber si ya pasamos las columnas de datos
+
+        for index, row in schema_df.iterrows():
+            col_name = str(row["col_name"]).strip()
+            data_type = str(row["data_type"]).strip()
+
+            # Saltar líneas de comentario o encabezados de sección
+            if col_name.startswith("#"):
+                if "Partition Information" in col_name:
+                    past_data_columns = True # Hemos encontrado la sección de información de partición
+                continue
+
+            # Saltar la línea en blanco que separa las columnas de datos de las de partición
+            if col_name == "":
+                past_data_columns = True # Después de una línea en blanco, estamos en la sección de partición
+                continue
+
+            # Clasificar la columna
+            if past_data_columns:
+                partition_columns_info.append((col_name, data_type))
+            else:
+                data_columns_info.append((col_name, data_type))
+
+        hive_data_schema = pd.DataFrame(data_columns_info, columns=["col_name", "data_type"])
+        hive_partition_schema = pd.DataFrame(partition_columns_info, columns=["col_name", "data_type"])
+
+        # Unir los esquemas para obtener el orden total de las columnas en la tabla destino
+        full_hive_schema = pd.concat([hive_data_schema, hive_partition_schema], ignore_index=True)
+
+        # Debug de conteo de columnas
+        if debug_schema:
+            print(f"DEBUG: Número de columnas en DataFrame de entrada (df): {len(df.columns)}")
+            print(f"DEBUG: Número de columnas de datos en tabla destino: {len(hive_data_schema)}")
+            print(f"DEBUG: Número de columnas de partición en tabla destino: {len(hive_partition_schema)}")
+            print(f"DEBUG: Número TOTAL de columnas esperadas en tabla destino (datos + partición): {len(full_hive_schema)}")
+            print("-" * 50) # Separador para claridad
+
+        # 4) Preparar 'safe cast' y alias de columnas para TODAS las columnas en el orden de Hive
+        df_cols = {c.lower().split('.')[-1]: c for c in df.columns} # Mapeo de nombres de columnas del DF de entrada
+        casted = [] # Lista para almacenar las expresiones de columna casteadas
+        patron_decimal = r"^-?\d+(\.\d+)?$" # Patrón para validar números decimales
+        numeric_pref = ("float", "double", "decimal") # Prefijos de tipos numéricos
+
+        # Iterar sobre el esquema completo de la tabla destino (datos + partición)
+        for name, dtype in full_hive_schema.itertuples(index=False):
+            key = name.lower()
+            if key not in df_cols:
+                raise ValueError(f"Columna '{name}' (del esquema destino) no encontrada en el DataFrame de entrada: {df.columns}. Asegúrate de que el DF de entrada contenga todas las columnas de la tabla destino, incluyendo las de partición.")
+
+            spark_col = col(df_cols[key]) # Columna original del DataFrame de entrada
+
+            # Aplicar 'safe cast' solo a columnas de datos que sean numéricas
+            if name in hive_data_schema["col_name"].values and any(dtype.lower().startswith(p) for p in numeric_pref):
+                clean_col = regexp_replace(spark_col, r"[^0-9\.-]", "") # Limpiar caracteres no numéricos
+                casted_col = when(
+                    clean_col.rlike(patron_decimal), # Si cumple el patrón numérico
+                    clean_col.cast(dtype)           # Castear al tipo destino
+                ).otherwise(None).alias(name)       # Si no, establecer a None y renombrar
+            else:
+                # Para columnas de datos no numéricas o cualquier columna de partición,
+                # simplemente castear directamente al tipo destino.
+                casted_col = spark_col.cast(dtype).alias(name)
+            casted.append(casted_col)
+
+        # 5) Seleccionar, castear y coalesce
+        # df2 ahora contendrá todas las columnas (datos + partición) en el orden y tipo correctos
+        df2 = df.select(*casted).coalesce(self.SparkPartitions)
+
+        # 6) Debug de esquemas opcional
+        if debug_schema:
+            print("=== Esquema Hive destino (Columnas de Datos) ===")
+            print(hive_data_schema.to_string(index=False))
+            print("\n=== Esquema Hive destino (Columnas de Partición) ===")
+            print(hive_partition_schema.to_string(index=False))
+            print("\n=== Esquema DataFrame casteado (todas las columnas, listo para insertar) ===")
+            df2.printSchema()
+            print()
+
+        # 7) Vista temporal y ejecución
+        tmp = "_tmp_replace"
+        df2.createOrReplaceTempView(tmp)
+
+        try:
+            if len(argsv) > 0:
+                # Usar insertInto para anexar datos (overwrite=False)
+                # Spark manejará las particiones automáticamente si df2 contiene las columnas de partición
+                df2.write.mode("overwrite").format("parquet") \
+                   .insertInto(dlake_tbl, overwrite=False) # 'overwrite=False' significa APPEND
+                self.write_log(f"✅ Datos anexados en {dlake_tbl} ({count_df} registros).", "INFO")
+            else:
+                # Usar INSERT OVERWRITE TABLE para sobreescribir datos
+                # Spark manejará las particiones automáticamente si SELECT * de tmp
+                # incluye las columnas de partición y coinciden con la tabla destino.
+                sql = f"INSERT OVERWRITE TABLE {dlake_tbl} SELECT * FROM {tmp}"
+                self.write_log(f"Ejecutando SQL:\n{sql}", "INFO")
+                self.spark.sql(sql)
+                self.write_log(f"✅ Datos insertados en {dlake_tbl} ({count_df} registros).", "INFO")
+        except Exception as e:
+            msg = f"Error en DLake_Replace para {dlake_tbl}: {e}"
+            self.write_log(msg, "ERROR")
+            raise
