@@ -158,3 +158,113 @@ class DLakeUtils: # Simulación de la clase para que el código sea ejecutable
             msg = f"Error en DLake_Replace para {dlake_tbl}: {e}"
             self.write_log(msg, "ERROR")
             raise
+
+
+def consulta_tablas(conex, start_date, end_date, diaria, mensual, campofecha):
+    """
+    Placeholder para la función consulta_tablas.
+    Esta función debería contener la lógica para consultar y procesar los datos
+    para el rango de fechas dado y luego usar DLake_Replace para insertarlos.
+    """
+    print(f"  [consulta_tablas] Procesando desde {start_date} hasta {end_date} para {mensual}")
+    # Aquí iría tu lógica real de consulta y procesamiento
+    # Por ejemplo:
+    # df_daily = conex.spark.table(diaria).filter(f"{campofecha} BETWEEN '{start_date}' AND '{end_date}'")
+    # conex.DLake_Replace(df_daily, mensual)
+
+
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campofecha, processdate):
+    """
+    Gestiona la ingesta de datos históricos mensuales, asegurando que un mes
+    completo no se re-ingeste si ya ha sido procesado.
+
+    Args:
+        conex: Objeto de conexión a Spark (ej. instancia de DLakeUtils).
+        fechas_iniciales (list[date]): Lista de fechas de inicio de los rangos mensuales a considerar.
+        fechas_finales (list[date]): Lista de fechas de fin de los rangos mensuales a considerar.
+        diaria (str): Nombre de la tabla diaria de donde se extraen los datos.
+        mensual (str): Nombre de la tabla mensual donde se insertan los datos.
+        campofecha (str): Nombre de la columna de fecha en la tabla diaria.
+        processdate (str): Nombre de la columna de fecha de procesamiento en la tabla mensual.
+    """
+    hoy = datetime.today().date()  # Fecha de hoy
+
+    # 1. Obtener la fecha máxima ya procesada en la tabla mensual
+    rangos_max = conex.spark.table(mensual).selectExpr(f"max({processdate}) as max_date").collect()
+
+    max_processed_date = None
+    try:
+        r_max = rangos_max[0][0]
+        if r_max: # Asegurarse de que r_max no sea None (tabla vacía)
+            max_processed_date = datetime.strptime(r_max, '%Y-%m-%d').date() if isinstance(r_max, str) else r_max
+    except Exception as e:
+        conex.write_log(f"Advertencia: No se pudo obtener la fecha máxima procesada o la tabla está vacía. Error: {e}", "WARNING")
+        # Si no hay datos en la tabla mensual, tomamos el mes antepasado como punto de partida.
+        # Si se desea procesar desde el inicio de fechas_iniciales, se puede cambiar.
+        if fechas_iniciales:
+            # Establecer max_processed_date a un día antes del primer mes para que se procese
+            max_processed_date = fechas_iniciales[0] - relativedelta(days=1)
+        else:
+            # Default si no hay fechas_iniciales, usar el mes antepasado
+            max_processed_date = hoy - relativedelta(months=2)
+
+
+    print("📌 Fecha máxima registrada (processdate):", max_processed_date)
+    print("📆 Hoy:", hoy)
+
+    # 2. Determinar el mes que necesita ser procesado
+    month_to_process_start = None
+    if max_processed_date:
+        last_day_of_max_month = date(max_processed_date.year, max_processed_date.month,
+                                     calendar.monthrange(max_processed_date.year, max_processed_date.month)[1])
+
+        if max_processed_date == last_day_of_max_month:
+            # Si la fecha máxima procesada es el último día de su mes, el mes ya está completo.
+            # Pasamos al primer día del mes siguiente.
+            month_to_process_start = last_day_of_max_month + relativedelta(days=1)
+            print(f"✅ Mes {max_processed_date.strftime('%Y-%m')} ya procesado. Considerando el siguiente mes.")
+        else:
+            # Si la fecha máxima procesada NO es el último día de su mes, ese mes está incompleto.
+            # Queremos completar ese mes, así que el mes a procesar es el de max_processed_date (primer día del mes).
+            month_to_process_start = date(max_processed_date.year, max_processed_date.month, 1)
+            print(f"⚠️ Mes {max_processed_date.strftime('%Y-%m')} incompleto. Procesando para completarlo.")
+    else:
+        # Si no hay fecha máxima procesada (tabla mensual vacía),
+        # tomamos el mes antepasado como punto de partida para la ingesta.
+        month_to_process_start = hoy - relativedelta(months=2)
+        month_to_process_start = date(month_to_process_start.year, month_to_process_start.month, 1)
+        print(f"ℹ️ Tabla mensual vacía. Iniciando ingesta desde {month_to_process_start.strftime('%Y-%m')}.")
+
+    # Si el mes a procesar es futuro, no hacemos nada
+    if month_to_process_start and (month_to_process_start.year > hoy.year or \
+                                   (month_to_process_start.year == hoy.year and month_to_process_start.month > hoy.month)):
+        print(f"❌ El mes a procesar ({month_to_process_start.strftime('%Y-%m')}) es futuro. No se hace nada.")
+        return
+
+    # 3. Verificar si estamos en el rango de ejecución permitido (días 7-15)
+    # Esta es una regla de negocio que se mantiene.
+    if not (hoy.day >= 7 and hoy.day <= 15):
+        print(f"⏳ No estás en rango de ejecución mensual (día {hoy.day}). Se ejecuta solo del día 7 al 15 del mes.")
+        return
+
+    print("✅ Ejecutando ingesta de historia mensual...")
+
+    # 4. Encontrar el rango de fechas adecuado de las listas de entrada
+    found_range_to_process = False
+    for start_date_candidate, end_date_candidate in zip(fechas_iniciales, fechas_finales):
+        # Asegurarse de que las fechas candidatas sean objetos date
+        if isinstance(start_date_candidate, str):
+            start_date_candidate = datetime.strptime(start_date_candidate, '%Y-%m-%d').date()
+        if isinstance(end_date_candidate, str):
+            end_date_candidate = datetime.strptime(end_date_candidate, '%Y-%m-%d').date()
+
+        # Si el mes y año de la fecha de inicio candidata coinciden con el mes a procesar
+        if start_date_candidate.month == month_to_process_start.month and \
+           start_date_candidate.year == month_to_process_start.year:
+            print(f"⏳ Procesando rango: {start_date_candidate} hasta {end_date_candidate}")
+            consulta_tablas(conex, start_date_candidate, end_date_candidate, diaria, mensual, campofecha)
+            found_range_to_process = True
+            break # Una vez que encontramos y procesamos el mes, salimos del bucle
+
+    if not found_range_to_process:
+        print(f"❌ No se encontró un rango de fechas iniciales/finales para el mes {month_to_process_start.strftime('%Y-%m')}.")
