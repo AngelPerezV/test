@@ -1395,3 +1395,301 @@ table_outbound = spark.createDataFrame([], schema=empty_schema)
 table_staff = spark.createDataFrame([], schema=empty_schema)
 table_nice_act_forecast = spark.createDataFrame([], schema=empty_schema)
 table_nice_adh_attr_summary = spark.createDataFrame([], schema=empty_schema)
+
+
+
+
+
+
+
+
+import numpy as np
+import sys
+import warnings
+from datetime import datetime
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import max, col, to_date, lit
+from pyspark.sql.types import StructType
+from typing import Tuple
+
+warnings.filterwarnings("ignore")
+
+### SET UP VARIABLES ##
+begin = datetime.now()
+print(f"Stage << {'Beginning execution process'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+
+def jerarquia_dialer(df_jerarquia_dialer: DataFrame, spark: SparkSession) -> Tuple:
+    """
+    Función que procesa el DataFrame de jerarquía para generar las vistas necesarias.
+    """
+    try:
+        print("Funcion para obtener la Jerarquia del Dialer actualizada por diferentes tabs")
+        
+        jerarquia_dialer_hist_rg_sg = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('Report Groups to Super Groups')).dropDuplicates(subset=['reportnamemasterid', 'reportname', 'supergroupmasterid', 'supergroupname', 'startdate']).select(col('reportnamemasterid'), col('reportname'), col('supergroupmasterid'), col('supergroupname'), to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_sg'), to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_sg'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lg_rg_ib = df_jerarquia_dialer.filter((df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp')) & (df_jerarquia_dialer['classification'].isin('IB Service'))).dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname']).select(col('lobmasterid'), col('groupname'), to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'), to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'), col('reportnamemasterid'), col('reportname'), to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lob_sid = df_jerarquia_dialer.filter((df_jerarquia_dialer['tab'].isin('LOBs to Service Ids')) & (df_jerarquia_dialer['classification'].isin('IB Service'))).dropDuplicates(subset=['lobmasterid', 'groupname', 'startdate', 'serviceid']).select(col('lobmasterid'), col('groupname'), to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_serviceid'), to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_serviceid'), col('uip_inst'), col('uip_inst_serviceid'), col('serviceid'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lg_rg_ob = df_jerarquia_dialer.filter((df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp')) & (df_jerarquia_dialer['classification'].isin('List'))).dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname']).select(col('lobmasterid'), col('groupname'), to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'), to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'), col('reportnamemasterid'), col('reportname'), to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lob_alm = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOBs to ALMLists')).dropDuplicates(subset=['lobmasterid', 'groupname', 'uip_inst', 'listname', 'listname_startdate']).select(col('lobmasterid'), col('groupname'), col('uip_inst'), col('listname'), to_date(col('listname_startdate'), "dd/MM/yyyy").alias('listname_startdate'), to_date(col('listname_stopdate'), "dd/MM/yyyy").alias('listname_stopdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_alm_active = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('ALMList Active Goals')).dropDuplicates(subset=['listname', 'updatedate', 'startdate']).select(col('listname').alias('listname_active'), to_date(col('updatedate'), "dd/MM/yyyy").alias('updatedate_active'), col('goallow').alias('goallow_active'), col('goalhigh').alias('goalhigh_active'), to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_active'), to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_active'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lob_sid_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOBs to Service Ids')).dropDuplicates(subset=['lobmasterid', 'groupname', 'startdate', 'serviceid']).select(col('lobmasterid'), col('groupname'), to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_serviceid'), to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_serviceid'), col('uip_inst'), col('uip_inst_serviceid'), col('serviceid'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_lg_rg_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp')).dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname']).select(col('lobmasterid'), col('groupname'), to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'), to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'), col('reportnamemasterid'), col('reportname'), to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_mu_rg = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('NICEMU-WorkSeg-ReportGrp Config')).dropDuplicates(subset=['reportnamemasterid', 'reportname', 'mu_id', 'nicemu', 'nicemu_startdate']).select(col('reportnamemasterid'), col('reportname'), col('mu_id'), col('nicemu'), to_date(col('nicemu_startdate'), "dd/MM/yyyy").alias('nicemu_startdate'), to_date(col('nicemu_stopdate'), "dd/MM/yyyy").alias('nicemu_stopdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+        jerarquia_dialer_hist_fg_rg_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('Forecast Group to Report Group')).dropDuplicates(subset=['reportnamemasterid', 'reportname', 'fcstgrpid', 'forecast_group_code', 'fcst_group_code_startdate']).select(col('reportnamemasterid'), col('reportname'), col('fcstgrpid'), col('forecast_group_code'), to_date(col('fcst_group_code_startdate'), "dd/MM/yyyy").alias('fcst_group_code_startdate'), to_date(col('fcst_group_code_stopdate'), "dd/MM/yyyy").alias('fcst_group_code_stopdate'), to_date(col('process_date'), "yyyy-MM-dd").alias('process_date'))
+
+        return (
+            jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_lg_rg_ib, jerarquia_dialer_hist_lob_sid,
+            jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_lob_alm, jerarquia_dialer_hist_alm_active,
+            jerarquia_dialer_hist_lob_sid_staff, jerarquia_dialer_hist_lg_rg_staff, jerarquia_dialer_hist_mu_rg,
+            jerarquia_dialer_hist_fg_rg_staff
+        )
+    
+    except Exception as e:
+        print(f"ERROR: Fallo en la función jerarquia_dialer: {e}")
+        empty_schema = StructType([])
+        empty_df = spark.createDataFrame([], schema=empty_schema)
+        return (empty_df,) * 10
+        
+def nice_dialer(df_nice_agent_info: DataFrame, df_nice_active_forecast: DataFrame, df_nice_agent_adherence_summary: DataFrame, spark: SparkSession) -> DataFrame:
+    """
+    Función que procesa y une los DataFrames de NICE para generar un único DataFrame final.
+    """
+    try:
+        print("Funcion para obtener el NICE Agent Info, Forecast y Adherence Summary unificados.")
+
+        df_nice_agent_info_sel = df_nice_agent_info.select(col('date'), col('muid'), col('externalid'))
+        df_nice_active_forecast_sel = df_nice_active_forecast.select(col('date'), col('period'), col('ctid'), col('ctname'), col('fcstcontactsreceived'), col('fcstaht'), col('fcstreq'), col('schedopen'))
+        df_nice_agent_adherence_summary_sel = df_nice_agent_adherence_summary.select(col('date'), col('muid'), col('attribute'), col('totalact'), col('totalsched'), col('unitmanager'), col('logonid'), col('externalid'))
+
+        joined_df_1 = df_nice_agent_info_sel.join(df_nice_agent_adherence_summary_sel, on=['date', 'muid', 'externalid'], how='inner')
+        table_nice_dialer_final = joined_df_1.join(df_nice_active_forecast_sel, on=['date'], how='inner')
+
+        return table_nice_dialer_final
+
+    except Exception as e:
+        print(f"ERROR: Fallo en la función nice_dialer: {e}")
+        return spark.createDataFrame([], schema=StructType([]))
+
+def principal():
+    try:
+        print(f"Stage << {'Beginning SparkSession'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+        spark = SparkSession.builder.appName("DataProcessingPipeline").enableHiveSupport().getOrCreate()
+        print(f"Stage << {'SparkSession'}>> connected at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+    except Exception as e:
+        print(f'Could not continue with the execution of your process, failed initialization of SparkSession: {e}')
+        sys.exit(1)
+
+    listTableNotExist = []
+    print("\nStage << {'Beginning read of input tables and date validation of information'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M: %S')}")
+    listTablesInputs = []
+    
+    # Reemplaza 'schema_name' con el nombre de tu esquema real
+    table_list = ['contact_event', 'int_agent_det', 'acd_call_det', 'agent_act_sum', 'cat_dialer', 'jerarquia_dialer', 'nice_active_forecast', 'nice_agent_adherence_summary', 'nice_agent_info', 'nice_agent_dialer', 'nice_agent_hier_master']
+    
+    for table_i in table_list:
+        try:
+            print(f"Stage << {'Reading table ' + table_i}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M: %S')}")
+            query_df = spark.sql(f"SELECT * FROM {'schema_name'}.{table_i}")
+            print(f"Stage << {'Reading table ' + table_i}>> finished at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+            listTablesInputs.append(query_df)
+        except Exception as e:
+            listTableNotExist.append(table_i)
+            print(f'Failed to table read {table_i}: {e}')
+
+    if len(listTableNotExist) > 0:
+        print(f'Could not continue with the execution of your process, are missing the next tables: {listTableNotExist}')
+        sys.exit(1)
+        
+    try:
+        df_contact_event = listTablesInputs[0]
+        df_int_agent_det = listTablesInputs[1]
+        df_acd_call_det = listTablesInputs[2]
+        df_agent_act_sum = listTablesInputs[3]
+        df_cat_dialer = listTablesInputs[4]
+        df_jerarquia_dialer = listTablesInputs[5]
+        df_nice_active_forecast = listTablesInputs[6]
+        df_nice_agent_adherence_summary = listTablesInputs[7]
+        df_nice_agent_info = listTablesInputs[8]
+        df_nice_agent_dialer = listTablesInputs[9]
+        df_nice_agent_hier_master = listTablesInputs[10]
+        print("Asignación de DataFrames a variables completada.")
+    except Exception as e:
+        print(f"Error al asignar DataFrames desde la lista de entrada: {e}")
+        sys.exit(1)
+
+    try:
+        print("\nFiltrando DataFrames de catálogo y jerarquía por la fecha más reciente...")
+        df_cat_dialer = df_cat_dialer.withColumn('process_date', to_date(col('process_date')))
+        df_jerarquia_dialer = df_jerarquia_dialer.withColumn('process_date', to_date(col('process_date')))
+        max_catalogo_date = df_cat_dialer.select(max('process_date')).first()[0]
+        df_cat_dialer = df_cat_dialer.filter(col('process_date') == max_catalogo_date)
+        max_jerarquia_date = df_jerarquia_dialer.select(max('process_date')).first()[0]
+        df_jerarquia_dialer = df_jerarquia_dialer.filter(col('process_date') == max_jerarquia_date)
+        print("Filtrado completado.")
+    except Exception as e:
+        print(f"Error al filtrar por fecha de procesamiento: {e}")
+        sys.exit(1)
+
+    # --- Procesamiento de jerarquías ---
+    print("\nIniciando procesamiento de jerarquías para Dialer...")
+    try:
+        if df_jerarquia_dialer.count() > 0:
+            (jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_lg_rg_ib, jerarquia_dialer_hist_lob_sid,
+             jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_lob_alm, jerarquia_dialer_hist_alm_active,
+             jerarquia_dialer_hist_lob_sid_staff, jerarquia_dialer_hist_lg_rg_staff, jerarquia_dialer_hist_mu_rg,
+             jerarquia_dialer_hist_fg_rg_staff) = jerarquia_dialer(df_jerarquia_dialer, spark)
+            print("Procesamiento de jerarquías completado.")
+        else:
+            print("ADVERTENCIA: El DataFrame df_jerarquia_dialer está vacío. No se procesarán las jerarquías.")
+            empty_schema = StructType([])
+            empty_df = spark.createDataFrame([], schema=empty_schema)
+            (jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_lg_rg_ib, jerarquia_dialer_hist_lob_sid,
+             jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_lob_alm, jerarquia_dialer_hist_alm_active,
+             jerarquia_dialer_hist_lob_sid_staff, jerarquia_dialer_hist_lg_rg_staff, jerarquia_dialer_hist_mu_rg,
+             jerarquia_dialer_hist_fg_rg_staff) = (empty_df,) * 10
+    except Exception as e:
+        print(f"Error en el procesamiento de jerarquías: {e}")
+        sys.exit(1)
+
+    # --- Creación de los DataFrames finales ---
+    print("\nInicia creación de dataframes finales para Dialer...")
+    empty_schema = StructType([])
+    table_inbound = spark.createDataFrame([], schema=empty_schema)
+    table_outbound = spark.createDataFrame([], schema=empty_schema)
+    table_staff = spark.createDataFrame([], schema=empty_schema)
+    table_nice_act_forecast = spark.createDataFrame([], schema=empty_schema)
+    table_nice_adh_attr_summary = spark.createDataFrame([], schema=empty_schema)
+    table_nice_dialer_final = spark.createDataFrame([], schema=empty_schema)
+    
+    try:
+        # Aquí se llama a tus funciones. Si alguna falla, las variables ya tienen un valor por defecto.
+        # Descomenta las líneas a medida que implementes tus funciones
+        # print("Data Inbound...")
+        # table_inbound = data_inbound(...)
+
+        # print("Data Outbound...")
+        # table_outbound = data_outbound(...)
+
+        # print("Data Staff...")
+        # table_staff = data_staff(...)
+
+        # print("Data Nice Active Forecast...")
+        # table_nice_act_forecast = data_forecast(...)
+
+        # print("Data Nice Adherence Attribute Summary...")
+        # table_nice_adh_attr_summary = data_nice_agent_adherence_summary(...)
+        
+        print("Data Nice Dialer Hierarchy...")
+        table_nice_dialer_final = nice_dialer(
+           df_nice_agent_info,
+           df_nice_active_forecast,
+           df_nice_agent_adherence_summary,
+           spark
+        )
+        
+    except Exception as e:
+        print(f"Error al crear los DataFrames finales: {e}")
+        sys.exit(1)
+
+    # --- Cifras de control ---
+    try:
+        print("\nIniciando el cálculo de cifras de control...")
+        controltable_nice_adh_attr_summary = table_nice_adh_attr_summary.filter(col("date_nice_agent_adh_summary") >= "2024-08-01").count()
+        print(f"table_nice_adh_attr_summary: {controltable_nice_adh_attr_summary}")
+        
+        controltable_staff = table_staff.filter(col("record_date") >= "2024-08-01").count()
+        print(f"table_staff: {controltable_staff}")
+        
+        controltable_nice_act_forecast = table_nice_act_forecast.filter(col("date_nice_active_fcst") >= "2024-08-01").count()
+        print(f"table_nice_act_forecast: {controltable_nice_act_forecast}")
+        
+        controltable_inbound = table_inbound.filter(col("record_date") >= "2024-08-01").count()
+        print(f"table_inbound: {controltable_inbound}")
+        
+        controltable_outbound = table_outbound.count()
+        print(f"table_outbound: {controltable_outbound}")
+
+        DF_User1_data = [
+            ("table_nice_adh_attr_summary", controltable_nice_adh_attr_summary),
+            ("table_staff", controltable_staff),
+            ("table_nice_act_forecast", controltable_nice_act_forecast),
+            ("table_inbound", controltable_inbound),
+            ("table_outbound", controltable_outbound)
+        ]
+        columns = ["DataFrame", "Registros"]
+        DF_User1 = spark.createDataFrame(DF_User1_data, columns)
+        print("Cálculo de cifras de control finalizado con éxito.")
+    except Exception as e:
+        print(f"Error al calcular cifras de control: {e}")
+        sys.exit(1)
+        
+    # --- Inserción en tablas de Hive con overwrite ---
+    print("\nIniciando la inserción en tablas de Hive...")
+    listNotInsert = []
+    
+    # Reemplaza 'nombre_esquema' y 'nombre_tabla' con los nombres reales
+    try:
+        print("Insertando table_nice_adh_attr_summary...")
+        table_nice_adh_attr_summary.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_nice_adh_attr_summary")
+        table_nice_adh_attr_summary.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_adh_attr_summary')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_adh_attr_summary: {e}")
+    
+    try:
+        print("Insertando table_staff...")
+        table_staff.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_staff")
+        table_staff.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_staff')
+        print(f"ERROR: Fallo al insertar en la tabla table_staff: {e}")
+        
+    try:
+        print("Insertando table_nice_act_forecast...")
+        table_nice_act_forecast.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_nice_act_forecast")
+        table_nice_act_forecast.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_act_forecast')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_act_forecast: {e}")
+
+    try:
+        print("Insertando table_inbound...")
+        table_inbound.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_inbound")
+        table_inbound.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_inbound')
+        print(f"ERROR: Fallo al insertar en la tabla table_inbound: {e}")
+
+    try:
+        print("Insertando table_outbound...")
+        table_outbound.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_outbound")
+        table_outbound.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_outbound')
+        print(f"ERROR: Fallo al insertar en la tabla table_outbound: {e}")
+        
+    try:
+        print("Insertando table_nice_dialer_final...")
+        table_nice_dialer_final.write.mode("overwrite").insertInto("nombre_esquema.nombre_tabla_nice_dialer_final")
+        table_nice_dialer_final.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_dialer_final')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_dialer_final: {e}")
+
+    if len(listNotInsert) > 0:
+        print(f'\nERROR: No se pudo insertar en las siguientes tablas: {listNotInsert}')
+        sys.exit(1)
+    else:
+        print("\nInserción en todas las tablas de Hive finalizada con éxito.")
+
+    # --- Notificación por correo electrónico y finalización ---
+    try:
+        print("\nGenerando correo de notificación y finalizando proceso...")
+        # Aquí iría tu función notification_mail
+        print(f"Ejecución del proceso finalizada con éxito.")
+        spark.stop()
+    except Exception as e:
+        print(f"Error durante la limpieza, notificación o finalización: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    principal()
