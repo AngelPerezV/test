@@ -1693,3 +1693,24 @@ def principal():
 
 if __name__ == "__main__":
     principal()
+
+
+
+
+
+ # --- Filtrado por la fecha de procesamiento específica ---
+    try:
+        # Define aquí la fecha específica que quieres usar, por ejemplo:
+        fecha_procesamiento = "2024-08-01" 
+        print(f"\nFiltrando DataFrames de catálogo y jerarquía por la fecha: {fecha_procesamiento}...")
+        
+        df_cat_dialer = df_cat_dialer.withColumn('process_date', to_date(col('process_date')))
+        df_jerarquia_dialer = df_jerarquia_dialer.withColumn('process_date', to_date(col('process_date')))
+
+        df_cat_dialer = df_cat_dialer.filter(col('process_date') == fecha_procesamiento)
+        df_jerarquia_dialer = df_jerarquia_dialer.filter(col('process_date') == fecha_procesamiento)
+        
+        print("Filtrado completado.")
+    except Exception as e:
+        print(f"Error al filtrar por fecha de procesamiento: {e}")
+        sys.exit(1)
