@@ -1386,3 +1386,12 @@ def nice_dialer(df_nice_agent_info: DataFrame, df_nice_active_forecast: DataFram
         print(f"ERROR: Fallo en la función nice_dialer: {e}")
         # En caso de error, devuelve un DataFrame vacío
         return spark.createDataFrame([], schema=StructType([]))
+
+
+# Inicializa todas las variables como DataFrames vacíos por defecto
+empty_schema = StructType([])
+table_inbound = spark.createDataFrame([], schema=empty_schema)
+table_outbound = spark.createDataFrame([], schema=empty_schema)
+table_staff = spark.createDataFrame([], schema=empty_schema)
+table_nice_act_forecast = spark.createDataFrame([], schema=empty_schema)
+table_nice_adh_attr_summary = spark.createDataFrame([], schema=empty_schema)
