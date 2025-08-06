@@ -1324,3 +1324,65 @@ def jerarquia_dialer(df_jerarquia_dialer, spark):
         # El código original tiene 10 variables de retorno, pero la tupla de return solo tiene 9.
         # He ajustado la lógica para devolver 10 DataFrames vacíos, que es lo que el código espera.
         return (empty_df,) * 10
+
+
+
+def nice_dialer(df_nice_agent_info: DataFrame, df_nice_active_forecast: DataFrame, df_nice_agent_adherence_summary: DataFrame, spark: SparkSession) -> DataFrame:
+    """
+    Función que procesa y une los DataFrames de NICE para generar un único DataFrame final.
+    """
+    try:
+        print("Función para obtener el NICE Agent Info, Forecast y Adherence Summary unificados.")
+
+        # Seleccionar las columnas necesarias de cada DataFrame
+        df_nice_agent_info_sel = df_nice_agent_info.select(
+            col('date'),
+            col('muid'),
+            col('externalid')
+        )
+        
+        df_nice_active_forecast_sel = df_nice_active_forecast.select(
+            col('date'),
+            col('period'),
+            col('ctid'),
+            col('ctname'),
+            col('fcstcontactsreceived'),
+            col('fcstaht'),
+            col('fcstreq'),
+            col('schedopen')
+        )
+        
+        df_nice_agent_adherence_summary_sel = df_nice_agent_adherence_summary.select(
+            col('date'),
+            col('muid'),
+            col('attribute'),
+            col('totalact'),
+            col('totalsched'),
+            col('unitmanager'),
+            col('logonid'),
+            col('externalid')
+        )
+
+        # Unir los DataFrames. La lógica más común es unirlos por fecha e ID de agente.
+        # Primero, unimos agent_info y agent_adherence_summary por las columnas en común.
+        # Asumo que 'date', 'muid' y 'externalid' son las claves de unión.
+        joined_df_1 = df_nice_agent_info_sel.join(
+            df_nice_agent_adherence_summary_sel,
+            on=['date', 'muid', 'externalid'],
+            how='inner'  # Usa 'inner' para registros que coinciden en ambos
+        )
+        
+        # Luego, unimos el resultado con el DataFrame de forecast por la fecha.
+        # Puedes ajustar las claves de unión si son diferentes en tu lógica.
+        table_nice_dialer_final = joined_df_1.join(
+            df_nice_active_forecast_sel,
+            on=['date'],
+            how='inner'
+        )
+
+        return table_nice_dialer_final
+
+    except Exception as e:
+        print(f"ERROR: Fallo en la función nice_dialer: {e}")
+        # En caso de error, devuelve un DataFrame vacío
+        return spark.createDataFrame([], schema=StructType([]))
