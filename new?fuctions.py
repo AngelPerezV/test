@@ -838,3 +838,294 @@ def nice_dialer(
     except Exception as e:
         print(f"Error en el procesamiento de nice_dialer: {e}")
         return None
+
+
+
+
+
+
+
+
+
+
+import numpy as np
+import sys
+import warnings
+from datetime import datetime
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import max, col, to_date
+
+# Asumo que las funciones del módulo Dialer_funtions y las clases de utilidades existen
+# from src.user.Dialer_funtions import *
+# from src.user import cf
+# from src.user.CitiPyLogger import CitiPyLogger
+# from src.user.CitiPyMail import CitiPyMail
+# from src.user.CitiPySpark import CitiPySpark
+
+warnings.filterwarnings("ignore")
+
+### SET UP VARIABLES ##
+# Descomenta y ajusta si usas estas clases/variables
+# logger = CitiPyLogger()
+# mail = CitiPyMail()
+# logFile_results = cf.fileName_results
+# logFile_err = cf.fileName_err
+begin = datetime.now()
+# logger.step_logger('info', ((f"Stage << {'Beginning execution process ' + cf.processName}>> started at {datetime.now().strftime('%d-%m-%Y, %H:%M:%S')}")))
+# mail.send_notification(cf.sender, cf.receivers, cf.subject, '* Execution process already begin.')
+print(f"Stage << {'Beginning execution process'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+
+def principal():
+    try:
+        # Inicialización de Spark con soporte para Hive
+        print(f"Stage << {'Beginning SparkSession'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+        # spark = CitiPySpark().spark
+        spark = SparkSession.builder.appName("DataProcessingPipeline").enableHiveSupport().getOrCreate()
+        print(f"Stage << {'SparkSession'}>> connected at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+    except Exception as e:
+        # logger.step_logger('Error', ((f"Main << Failed initialization of SparkSession: {e}>>")))
+        # logger.end_process(mail, 'Main << Could not continue with the execution of your process, failed initialization of SparkSession>> ')
+        print(f'Could not continue with the execution of your process, failed initialization of SparkSession: {e}')
+        sys.exit(1)
+
+    # --- Lógica de carga y validación de tablas de Hive ---
+    listTableNotExist = []
+    print("\nStage << {'Beginning read of input tables and date validation of information'}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M: %S')}")
+
+    listTablesInputs = []
+    # Usando tu estructura, se leen las tablas desde cf.input_table_list.
+    # Aquí se usa una lista de ejemplo, reemplázala con tu 'cf.input_table_list'.
+    # for table_i in cf.input_table_list:
+    for table_i in ['contact_event', 'int_agent_det', 'acd_call_det', 'agent_act_sum', 'cat_dialer', 'jerarquia_dialer', 'nice_active_forecast', 'nice_agent_adherence_summary', 'nice_agent_info', 'nice_agent_dialer', 'nice_agent_hier_master']:
+        try:
+            print(f"Stage << {'Reading table ' + table_i}>> started at {datetime.now().strftime('%d-%m-%Y, %H: %M: %S')}")
+            # Reemplaza 'schema_name' con el nombre de tu esquema real usando cf.dic_schema_table
+            # query_df = spark.sql(f"SELECT * FROM {cf.dic_schema_table[table_i]}.{table_i}")
+            query_df = spark.sql(f"SELECT * FROM {'schema_name'}.{table_i}")
+            print(f"Stage << {'Reading table ' + table_i}>> finished at {datetime.now().strftime('%d-%m-%Y, %H: %M: %S')}")
+            listTablesInputs.append(query_df)
+        except Exception as e:
+            listTableNotExist.append(table_i)
+            print(f'Failed to table read {table_i}: {e}')
+
+    if len(listTableNotExist) == 0:
+        print(f"Stage << {'Successfully was read all input tables'}>> finished at {datetime.now().strftime('%d-%m-%Y, %H: %M:%S')}")
+    else:
+        # logger.end_process(mail, 'Main << Could not continue with the execution of your process, are missing the next tables>> ' + str(listTableNotExist))
+        print(f'Could not continue with the execution of your process, are missing the next tables: {listTableNotExist}')
+        sys.exit(1)
+
+    try:
+        # Asignación de DataFrames a variables, usando el orden de tu lista
+        df_contact_event = listTablesInputs[0]
+        df_int_agent_det = listTablesInputs[1]
+        df_acd_call_det = listTablesInputs[2]
+        df_agent_act_sum = listTablesInputs[3]
+        df_cat_dialer = listTablesInputs[4]
+        df_jerarquia_dialer = listTablesInputs[5]
+        df_nice_active_forecast = listTablesInputs[6]
+        df_nice_agent_adherence_summary = listTablesInputs[7]
+        df_nice_agent_info = listTablesInputs[8]
+        df_nice_agent_dialer = listTablesInputs[9]
+        df_nice_agent_hier_master = listTablesInputs[10]
+        
+        print("Asignación de DataFrames a variables completada.")
+    except Exception as e:
+        print(f"Error al asignar DataFrames desde la lista de entrada: {e}")
+        sys.exit(1)
+
+    # --- Filtrado por la fecha de procesamiento más reciente ---
+    try:
+        print("\nFiltrando DataFrames de catálogo y jerarquía por la fecha más reciente...")
+        df_cat_dialer = df_cat_dialer.withColumn('process_date', to_date(col('process_date')))
+        df_jerarquia_dialer = df_jerarquia_dialer.withColumn('process_date', to_date(col('process_date')))
+
+        max_catalogo_date = df_cat_dialer.select(max('process_date')).first()[0]
+        df_cat_dialer = df_cat_dialer.filter(col('process_date') == max_catalogo_date)
+
+        max_jerarquia_date = df_jerarquia_dialer.select(max('process_date')).first()[0]
+        df_jerarquia_dialer = df_jerarquia_dialer.filter(col('process_date') == max_jerarquia_date)
+        print("Filtrado completado.")
+    except Exception as e:
+        print(f"Error al filtrar por fecha de procesamiento: {e}")
+        sys.exit(1)
+
+    # --- Procesamiento de jerarquías ---
+    print("\nIniciando procesamiento de jerarquías para Dialer...")
+    try:
+        (jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_lg_rg_ib, jerarquia_dialer_hist_lob_sid,
+         jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_lob_alm, jerarquia_dialer_hist_alm_active,
+         jerarquia_dialer_hist_lg_rg_staff, jerarquia_dialer_hist_mu_rg, jerarquia_dialer_hist_fg_rg_staff) = jerarquia_dialer(df_jerarquia_dialer)
+        print("Procesamiento de jerarquías completado.")
+    except Exception as e:
+        print(f"Error en el procesamiento de jerarquías: {e}")
+        sys.exit(1)
+
+    # --- Creación de los DataFrames finales ---
+    print("\nInicia creación de dataframes finales para Dialer...")
+    try:
+        print("Data Inbound...")
+        table_inbound = data_inbound(
+            df_contact_event, df_int_agent_det, jerarquia_dialer_hist_fg_rg_staff, jerarquia_dialer_hist_rg_sg
+        )
+
+        print("Data Outbound...")
+        table_outbound = data_outbound(
+            df_contact_event, df_int_agent_det, df_cat_dialer, jerarquia_dialer_hist_lob_alm, 
+            jerarquia_dialer_hist_alm_active, jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_rg_sg
+        )
+
+        print("Data Staff...")
+        table_staff = data_staff(
+            df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_mu_rg, 
+            df_nice_agent_info
+        )
+
+        print("Data Nice Active Forecast...")
+        table_nice_act_forecast = data_forecast(
+            jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_fg_rg_staff, df_nice_active_forecast
+        )
+
+        print("Data Nice Adherence Attribute Summary...")
+        table_nice_adh_attr_summary = data_nice_agent_adherence_summary(
+            df_nice_agent_adherence_summary, jerarquia_dialer_hist_mu_rg, jerarquia_dialer_hist_rg_sg
+        )
+        
+        print("Data Nice Dialer Hierarchy...")
+        table_nice_dialer_final = nice_dialer(
+            df_nice_agent_info, df_nice_agent_dialer, df_nice_agent_hier_master
+        )
+    except Exception as e:
+        print(f"Error al crear los DataFrames finales: {e}")
+        sys.exit(1)
+
+    # --- Cifras de control ---
+    try:
+        print("\nIniciando el cálculo de cifras de control...")
+        controltable_nice_adh_attr_summary = table_nice_adh_attr_summary.filter(col("date_nice_agent_adh_summary") >= "2024-08-01").count()
+        print(f"table_nice_adh_attr_summary: {controltable_nice_adh_attr_summary}")
+        
+        controltable_staff = table_staff.filter(col("record_date") >= "2024-08-01").count()
+        print(f"table_staff: {controltable_staff}")
+        
+        controltable_nice_act_forecast = table_nice_act_forecast.filter(col("date_nice_active_fcst") >= "2024-08-01").count()
+        print(f"table_nice_act_forecast: {controltable_nice_act_forecast}")
+        
+        controltable_inbound = table_inbound.filter(col("record_date") >= "2024-08-01").count()
+        print(f"table_inbound: {controltable_inbound}")
+        
+        controltable_outbound = table_outbound.count()
+        print(f"table_outbound: {controltable_outbound}")
+
+        DF_User1_data = [
+            ("table_nice_adh_attr_summary", controltable_nice_adh_attr_summary),
+            ("table_staff", controltable_staff),
+            ("table_nice_act_forecast", controltable_nice_act_forecast),
+            ("table_inbound", controltable_inbound),
+            ("table_outbound", controltable_outbound)
+        ]
+        columns = ["DataFrame", "Registros"]
+        DF_User1 = spark.createDataFrame(DF_User1_data, columns)
+        print("Cálculo de cifras de control finalizado con éxito.")
+    except Exception as e:
+        print(f"Error al calcular cifras de control: {e}")
+        sys.exit(1)
+        
+    # --- Inserción en tablas de Hive con overwrite ---
+    print("\nIniciando la inserción en tablas de Hive...")
+    listNotInsert = []
+    
+    try:
+        print("Insertando table_nice_adh_attr_summary...")
+        # Reemplaza 'nombre_esquema' y 'nombre_tabla' con los nombres correctos de tus tablas de Hive
+        table_nice_adh_attr_summary.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_nice_adh_attr_summary")
+        table_nice_adh_attr_summary.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_adh_attr_summary')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_adh_attr_summary: {e}")
+    
+    try:
+        print("Insertando table_staff...")
+        table_staff.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_staff")
+        table_staff.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_staff')
+        print(f"ERROR: Fallo al insertar en la tabla table_staff: {e}")
+        
+    try:
+        print("Insertando table_nice_act_forecast...")
+        table_nice_act_forecast.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_nice_act_forecast")
+        table_nice_act_forecast.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_act_forecast')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_act_forecast: {e}")
+
+    try:
+        print("Insertando table_inbound...")
+        table_inbound.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_inbound")
+        table_inbound.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_inbound')
+        print(f"ERROR: Fallo al insertar en la tabla table_inbound: {e}")
+
+    try:
+        print("Insertando table_outbound...")
+        table_outbound.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_outbound")
+        table_outbound.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_outbound')
+        print(f"ERROR: Fallo al insertar en la tabla table_outbound: {e}")
+        
+    try:
+        print("Insertando table_nice_dialer_final...")
+        table_nice_dialer_final.write.mode("overwrite").saveAsTable("nombre_esquema.nombre_tabla_nice_dialer_final")
+        table_nice_dialer_final.unpersist()
+    except Exception as e:
+        listNotInsert.append('table_nice_dialer_final')
+        print(f"ERROR: Fallo al insertar en la tabla table_nice_dialer_final: {e}")
+
+    if len(listNotInsert) == 0:
+        print("\nInserción en todas las tablas de Hive finalizada con éxito.")
+    else:
+        print(f'\nERROR: No se pudo insertar en las siguientes tablas: {listNotInsert}')
+        sys.exit(1)
+        
+    # --- Notificación por correo electrónico y finalización ---
+    try:
+        print("\nGenerando correo de notificación y finalizando proceso...")
+        # notification_mail(cf.idProcess, cf.processName, cf.sender, cf.receivers, cf.fileName_results, cf.nameLog, DF_User1)
+        
+        # Descacheo de DataFrames
+        # Unpersist de tablas de entrada
+        df_contact_event.unpersist()
+        df_int_agent_det.unpersist()
+        df_acd_call_det.unpersist()
+        df_agent_act_sum.unpersist()
+        df_cat_dialer.unpersist()
+        df_jerarquia_dialer.unpersist()
+        df_nice_active_forecast.unpersist()
+        df_nice_agent_adherence_summary.unpersist()
+        df_nice_agent_info.unpersist()
+        df_nice_agent_dialer.unpersist()
+        df_nice_agent_hier_master.unpersist()
+        
+        # Unpersist de tablas de jerarquía
+        jerarquia_dialer_hist_rg_sg.unpersist()
+        jerarquia_dialer_hist_lg_rg_ib.unpersist()
+        jerarquia_dialer_hist_lob_sid.unpersist()
+        jerarquia_dialer_hist_lg_rg_ob.unpersist()
+        jerarquia_dialer_hist_lob_alm.unpersist()
+        jerarquia_dialer_hist_alm_active.unpersist()
+        jerarquia_dialer_hist_lg_rg_staff.unpersist()
+        jerarquia_dialer_hist_mu_rg.unpersist()
+        jerarquia_dialer_hist_fg_rg_staff.unpersist()
+        
+        print(f"Ejecución del proceso finalizada con éxito.")
+        spark.stop()
+    except Exception as e:
+        print(f"Error durante la limpieza, notificación o finalización: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    principal()
