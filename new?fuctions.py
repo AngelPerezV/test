@@ -1129,3 +1129,198 @@ def principal():
 
 if __name__ == "__main__":
     principal()
+
+
+
+##### from pyspark.sql.functions import col, when, concat_ws, lit, to_date
+from pyspark.sql.types import StructType
+
+def jerarquia_dialer(df_jerarquia_dialer, spark):
+    """
+    Función que procesa el DataFrame de jerarquía para generar las vistas necesarias.
+    
+    Args:
+        df_jerarquia_dialer (DataFrame): DataFrame de jerarquía ya filtrado por fecha.
+        spark (SparkSession): Sesión de Spark para crear DataFrames vacíos en caso de error.
+
+    Returns:
+        tuple: Una tupla de DataFrames de las diferentes jerarquías.
+    """
+    try:
+        print("Función para obtener la Jerarquía del Dialer actualizada por diferentes tabs")
+        
+        # 1. Report Groups to Super Groups
+        print("Obteniendo dataframe de Report Groups to Super Groups")
+        jerarquia_dialer_hist_rg_sg = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('Report Groups to Super Groups'))
+        jerarquia_dialer_hist_rg_sg = jerarquia_dialer_hist_rg_sg.dropDuplicates(subset=['reportnamemasterid', 'reportname', 'supergroupmasterid', 'supergroupname', 'startdate'])
+        jerarquia_dialer_hist_rg_sg = jerarquia_dialer_hist_rg_sg.select(
+            col('reportnamemasterid'),
+            col('reportname'),
+            col('supergroupmasterid'),
+            col('supergroupname'),
+            to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_sg'),
+            to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_sg'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 2. Inbound de LOB Group - ReportGrp
+        print("Obteniendo dataframe para inbound de LOB Group - ReportGrp")
+        jerarquia_dialer_hist_lg_rg_ib = df_jerarquia_dialer.filter(
+            (df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp')) & 
+            (df_jerarquia_dialer['classification'].isin('IB Service'))
+        )
+        jerarquia_dialer_hist_lg_rg_ib = jerarquia_dialer_hist_lg_rg_ib.dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname'])
+        jerarquia_dialer_hist_lg_rg_ib = jerarquia_dialer_hist_lg_rg_ib.select(
+            col('lobmasterid'),
+            col('groupname'),
+            to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'),
+            to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'),
+            col('reportnamemasterid'),
+            col('reportname'),
+            to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+        
+        # 3. Inbound de LOBs to Service Ids
+        print("Obteniendo dataframe para inbound de LOBs to Service Ids")
+        jerarquia_dialer_hist_lob_sid = df_jerarquia_dialer.filter(
+            (df_jerarquia_dialer['tab'].isin('LOBs to Service Ids')) & 
+            (df_jerarquia_dialer['classification'].isin('IB Service'))
+        )
+        jerarquia_dialer_hist_lob_sid = jerarquia_dialer_hist_lob_sid.dropDuplicates(subset=['lobmasterid', 'groupname', 'startdate', 'serviceid'])
+        jerarquia_dialer_hist_lob_sid = jerarquia_dialer_hist_lob_sid.select(
+            col('lobmasterid'),
+            col('groupname'),
+            to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_serviceid'),
+            to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_serviceid'),
+            col('uip_inst'),
+            col('uip_inst_serviceid'),
+            col('serviceid'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 4. Outbound de LOB Group - ReportGrp
+        print("Obteniendo dataframe para outbound de LOB Group - ReportGrp")
+        jerarquia_dialer_hist_lg_rg_ob = df_jerarquia_dialer.filter(
+            (df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp')) & 
+            (df_jerarquia_dialer['classification'].isin('List'))
+        )
+        jerarquia_dialer_hist_lg_rg_ob = jerarquia_dialer_hist_lg_rg_ob.dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname'])
+        jerarquia_dialer_hist_lg_rg_ob = jerarquia_dialer_hist_lg_rg_ob.select(
+            col('lobmasterid'),
+            col('groupname'),
+            to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'),
+            to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'),
+            col('reportnamemasterid'),
+            col('reportname'),
+            to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 5. Outbound de LOBs to ALMLists
+        print("Obteniendo dataframe para outbound de LOBs to ALMLists")
+        jerarquia_dialer_hist_lob_alm = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOBs to ALMLists'))
+        jerarquia_dialer_hist_lob_alm = jerarquia_dialer_hist_lob_alm.dropDuplicates(subset=['lobmasterid', 'groupname', 'uip_inst', 'listname', 'listname_startdate'])
+        jerarquia_dialer_hist_lob_alm = jerarquia_dialer_hist_lob_alm.select(
+            col('lobmasterid'),
+            col('groupname'),
+            col('uip_inst'),
+            col('listname'),
+            to_date(col('listname_startdate'), "dd/MM/yyyy").alias('listname_startdate'),
+            to_date(col('listname_stopdate'), "dd/MM/yyyy").alias('listname_stopdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 6. Outbound de ALMList Active Goals
+        print("Obteniendo dataframe para outbound de ALMList Active Goals")
+        jerarquia_dialer_hist_alm_active = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('ALMList Active Goals'))
+        jerarquia_dialer_hist_alm_active = jerarquia_dialer_hist_alm_active.dropDuplicates(subset=['listname', 'updatedate', 'startdate'])
+        jerarquia_dialer_hist_alm_active = jerarquia_dialer_hist_alm_active.select(
+            col('listname').alias('listname_active'),
+            to_date(col('updatedate'), "dd/MM/yyyy").alias('updatedate_active'),
+            col('goallow').alias('goallow_active'),
+            col('goalhigh').alias('goalhigh_active'),
+            to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_active'),
+            to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_active'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 7. Staff de LOBs to Service Ids
+        print("Obteniendo dataframe para staff de LOBs to Service Ids")
+        jerarquia_dialer_hist_lob_sid_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOBs to Service Ids'))
+        jerarquia_dialer_hist_lob_sid_staff = jerarquia_dialer_hist_lob_sid_staff.dropDuplicates(subset=['lobmasterid', 'groupname', 'startdate', 'serviceid'])
+        jerarquia_dialer_hist_lob_sid_staff = jerarquia_dialer_hist_lob_sid_staff.select(
+            col('lobmasterid'),
+            col('groupname'),
+            to_date(col('startdate'), "dd/MM/yyyy").alias('startdate_serviceid'),
+            to_date(col('stopdate'), "dd/MM/yyyy").alias('stopdate_serviceid'),
+            col('uip_inst'),
+            col('uip_inst_serviceid'),
+            col('serviceid'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 8. Staff de LOB Group - ReportGrp
+        print("Obteniendo dataframe para staff de LOB Group - ReportGrp")
+        jerarquia_dialer_hist_lg_rg_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('LOB Group - ReportGrp'))
+        jerarquia_dialer_hist_lg_rg_staff = jerarquia_dialer_hist_lg_rg_staff.dropDuplicates(subset=['lobmasterid', 'groupname', 'lobtorgstartdate', 'reportnamemasterid', 'reportname'])
+        jerarquia_dialer_hist_lg_rg_staff = jerarquia_dialer_hist_lg_rg_staff.select(
+            col('lobmasterid'),
+            col('groupname'),
+            to_date(col('lobtorgstartdate'), "dd/MM/yyyy").alias('lobtorgstartdate'),
+            to_date(col('lobtorgstopdate'), "dd/MM/yyyy").alias('lobtorgstopdate'),
+            col('reportnamemasterid'),
+            col('reportname'),
+            to_date(col('rgstartdate'), "dd/MM/yyyy").alias('rgstartdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 9. NICEMU-WorkSeg-ReportGrp Config
+        print("Obteniendo dataframe para NICEMU-WorkSeg-ReportGrp Config")
+        jerarquia_dialer_hist_mu_rg = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('NICEMU-WorkSeg-ReportGrp Config'))
+        jerarquia_dialer_hist_mu_rg = jerarquia_dialer_hist_mu_rg.dropDuplicates(subset=['reportnamemasterid', 'reportname', 'mu_id', 'nicemu', 'nicemu_startdate'])
+        jerarquia_dialer_hist_mu_rg = jerarquia_dialer_hist_mu_rg.select(
+            col('reportnamemasterid'),
+            col('reportname'),
+            col('mu_id'),
+            col('nicemu'),
+            to_date(col('nicemu_startdate'), "dd/MM/yyyy").alias('nicemu_startdate'),
+            to_date(col('nicemu_stopdate'), "dd/MM/yyyy").alias('nicemu_stopdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        # 10. Staff de Forecast Group to Report Group
+        print("Obteniendo dataframe para staff de Forecast Group to Report Group")
+        jerarquia_dialer_hist_fg_rg_staff = df_jerarquia_dialer.filter(df_jerarquia_dialer['tab'].isin('Forecast Group to Report Group'))
+        jerarquia_dialer_hist_fg_rg_staff = jerarquia_dialer_hist_fg_rg_staff.dropDuplicates(subset=['reportnamemasterid', 'reportname', 'fcstgrpid', 'forecast_group_code', 'fcst_group_code_startdate'])
+        jerarquia_dialer_hist_fg_rg_staff = jerarquia_dialer_hist_fg_rg_staff.select(
+            col('reportnamemasterid'),
+            col('reportname'),
+            col('fcstgrpid'),
+            col('forecast_group_code'),
+            to_date(col('fcst_group_code_startdate'), "dd/MM/yyyy").alias('fcst_group_code_startdate'),
+            to_date(col('fcst_group_code_stopdate'), "dd/MM/yyyy").alias('fcst_group_code_stopdate'),
+            to_date(col('process_date'), "yyyy-MM-dd").alias('process_date')
+        )
+
+        return (
+            jerarquia_dialer_hist_rg_sg,
+            jerarquia_dialer_hist_lg_rg_ib,
+            jerarquia_dialer_hist_lob_sid,
+            jerarquia_dialer_hist_lg_rg_ob,
+            jerarquia_dialer_hist_lob_alm,
+            jerarquia_dialer_hist_alm_active,
+            jerarquia_dialer_hist_lg_rg_staff,
+            jerarquia_dialer_hist_mu_rg,
+            jerarquia_dialer_hist_fg_rg_staff
+        )
+    
+    except Exception as e:
+        print(f"ERROR: Fallo en la función jerarquia_dialer: {e}")
+        # En caso de error, retorna una tupla de DataFrames vacíos para evitar 'NoneType'
+        empty_schema = StructType([])
+        empty_df = spark.createDataFrame([], schema=empty_schema)
+        
+        # El código original tiene 10 variables de retorno, pero la tupla de return solo tiene 9.
+        # He ajustado la lógica para devolver 10 DataFrames vacíos, que es lo que el código espera.
+        return (empty_df,) * 10
