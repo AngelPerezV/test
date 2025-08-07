@@ -738,3 +738,13 @@ def data_nice_agent_adherence_summary(df_nice_agent_adherence_summary, jerarquia
         import traceback
         traceback.print_exc()
         return None
+    
+# ==============================================================================
+#  IMPORTS NECESARIOS PARA TODAS LAS FUNCIONES
+# ==============================================================================
+import traceback
+from pyspark.sql import functions as F, Window
+from pyspark.sql.functions import (col, to_date, lower, to_timestamp, hour, minute, concat, 
+                                   when, lit, sum, trim, max, concat_ws, month, row_number, 
+                                   date_format, year)
+from pyspark.sql.types import DateType, IntegerType, FloatType
