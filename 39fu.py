@@ -566,13 +566,12 @@ def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
 def data_forecast(jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_fg_rg_staff, df_nice_active_forecast):
     """
     Procesa y enriquece los datos de pronóstico (forecast) de NICE.
-    Versión corregida para evitar errores de columnas ambiguas en Spark 3.x.
+    Versión con corrección de ambigüedad de columnas mediante alias para Spark 3.x.
     """
     try:
         print("Iniciando el procesamiento de datos de Forecast...")
 
         # --- 1. Preparar y limpiar datos de NiceActiveForecast ---
-        # Se obtiene el registro más reciente para cada pronóstico usando una Window Function.
         window_spec = Window.partitionBy("date_nice_active_fcst", "ctid") \
                               .orderBy(col("process_date").desc())
 
@@ -582,9 +581,7 @@ def data_forecast(jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_fg_rg_staff
             .withColumn("row_num", row_number().over(window_spec)) \
             .filter(col("row_num") == 1) \
             .select(
-                "date_nice_active_fcst",
-                "period_nice_active_fcst",
-                "ctid",
+                "date_nice_active_fcst", "period_nice_active_fcst", "ctid",
                 col("fcstcontactsreceived").cast(FloatType()),
                 col("fcstaht").cast(FloatType()),
                 col("fcstreq").cast(FloatType()),
@@ -592,51 +589,45 @@ def data_forecast(jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_fg_rg_staff
             )
 
         # =================================================================================
-        # --- 2. Enriquecer con Jerarquías (SECCIÓN CORREGIDA) ---
+        # --- 2. Enriquecer con Jerarquías (SOLUCIÓN DEFINITIVA CON ALIAS) ---
         # =================================================================================
         print("Uniendo forecast con jerarquías (versión corregida para Spark 3)...")
 
         # --- Join 1: Con Forecast Group to Report Group ---
-        join_cond_1 = (df_forecast_latest['ctid'] == jerarquia_dialer_hist_fg_rg_staff['fcstgrpid']) & \
-                      (df_forecast_latest['date_nice_active_fcst'] >= jerarquia_dialer_hist_fg_rg_staff['fcst_group_code_startdate']) & \
-                      (when(jerarquia_dialer_hist_fg_rg_staff['fcst_group_code_stopdate'].isNull(), True)
-                       .otherwise(df_forecast_latest['date_nice_active_fcst'] <= jerarquia_dialer_hist_fg_rg_staff['fcst_group_code_stopdate']))
+        df_left_1 = df_forecast_latest.alias("left")
+        df_right_1 = jerarquia_dialer_hist_fg_rg_staff.alias("right")
         
-        df_unido_1 = df_forecast_latest.join(jerarquia_dialer_hist_fg_rg_staff, join_cond_1, 'inner')
+        join_cond_1 = (col("left.ctid") == col("right.fcstgrpid")) & \
+                      (col("left.date_nice_active_fcst") >= col("right.fcst_group_code_startdate")) & \
+                      (when(col("right.fcst_group_code_stopdate").isNull(), True)
+                       .otherwise(col("left.date_nice_active_fcst") <= col("right.fcst_group_code_stopdate")))
         
-        # CORRECCIÓN: Selección explícita
-        df_final_1 = df_unido_1.select(
-            *df_forecast_latest.columns, 
-            jerarquia_dialer_hist_fg_rg_staff["reportnamemasterid"], 
-            jerarquia_dialer_hist_fg_rg_staff["reportname"]
-        )
+        df_final_1 = df_left_1.join(df_right_1, join_cond_1, 'inner') \
+            .select(
+                "left.*", 
+                col("right.reportnamemasterid"), 
+                col("right.reportname")
+            )
 
         # --- Join 2: Con Report Group to Super Groups ---
-        join_cond_2 = (df_final_1['reportnamemasterid'] == jerarquia_dialer_hist_rg_sg['reportnamemasterid']) & \
-                      (df_final_1['date_nice_active_fcst'] >= jerarquia_dialer_hist_rg_sg['startdate_sg']) & \
-                      (when(jerarquia_dialer_hist_rg_sg['stopdate_sg'].isNull(), True)
-                       .otherwise(df_final_1['date_nice_active_fcst'] <= jerarquia_dialer_hist_rg_sg['stopdate_sg']))
+        df_left_2 = df_final_1.alias("left")
+        df_right_2 = jerarquia_dialer_hist_rg_sg.alias("right")
+
+        join_cond_2 = (col("left.reportnamemasterid") == col("right.reportnamemasterid")) & \
+                      (col("left.date_nice_active_fcst") >= col("right.startdate_sg")) & \
+                      (when(col("right.stopdate_sg").isNull(), True)
+                       .otherwise(col("left.date_nice_active_fcst") <= col("right.stopdate_sg")))
         
-        df_unido_2 = df_final_1.join(jerarquia_dialer_hist_rg_sg, join_cond_2, 'inner')
-
-        # CORRECCIÓN: Selección explícita
-        df_final = df_unido_2.select(*df_final_1.columns, jerarquia_dialer_hist_rg_sg["supergroupname"])
-
+        df_final = df_left_2.join(df_right_2, join_cond_2, 'inner') \
+            .select("left.*", col("right.supergroupname"))
 
         # --- 3. Limpieza y Selección Final ---
         print("Realizando limpieza y selección final...")
         uip_nice_active_forecast_d = df_final \
             .withColumn("month", month("date_nice_active_fcst").cast(IntegerType())) \
             .select(
-                "period_nice_active_fcst",
-                col("date_nice_active_fcst").cast(DateType()),
-                "supergroupname",
-                "reportname",
-                "fcstcontactsreceived",
-                "fcstaht",
-                "fcstreq",
-                "schedopen",
-                "month"
+                "period_nice_active_fcst", "date_nice_active_fcst", "supergroupname",
+                "reportname", "fcstcontactsreceived", "fcstaht", "fcstreq", "schedopen", "month"
             ) \
             .na.fill("") \
             .sort("date_nice_active_fcst", ascending=True)
