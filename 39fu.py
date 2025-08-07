@@ -644,13 +644,12 @@ def data_forecast(jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_fg_rg_staff
 def data_nice_agent_adherence_summary(df_nice_agent_adherence_summary, jerarquia_dialer_hist_mu_rg, jerarquia_dialer_hist_rg_sg):
     """
     Procesa y enriquece los datos de adherencia de agentes de NICE.
-    Versión corregida para evitar errores de columnas ambiguas en Spark 3.x.
+    Versión con corrección de ambigüedad de columnas mediante alias para Spark 3.x.
     """
     try:
         print("Iniciando el procesamiento de datos de Adherencia de Agentes...")
 
         # --- 1. Preparar y limpiar datos de Adherence Summary ---
-        # Usamos una sola Window Function para obtener el registro más reciente.
         window_spec = Window.partitionBy("date_nice_agent_adh_summary", "muid", "externalid", "attribute") \
                               .orderBy(col("process_date").desc())
 
@@ -669,51 +668,46 @@ def data_nice_agent_adherence_summary(df_nice_agent_adherence_summary, jerarquia
             )
 
         # =================================================================================
-        # --- 2. Enriquecer con Jerarquías (SECCIÓN CORREGIDA) ---
+        # --- 2. Enriquecer con Jerarquías (SOLUCIÓN DEFINITIVA CON ALIAS) ---
         # =================================================================================
         print("Uniendo adherencia con jerarquías (versión corregida para Spark 3)...")
 
         # --- Join 1: Con NICEMU-WorkSeg-ReportGrp Config ---
-        join_cond_1 = (df_adherence_latest['muid'] == jerarquia_dialer_hist_mu_rg['mu_id']) & \
-                      (df_adherence_latest['date_nice_agent_adh_summary'] >= jerarquia_dialer_hist_mu_rg['nicemu_startdate']) & \
-                      (when(jerarquia_dialer_hist_mu_rg['nicemu_stopdate'].isNull(), True)
-                       .otherwise(df_adherence_latest['date_nice_agent_adh_summary'] <= jerarquia_dialer_hist_mu_rg['nicemu_stopdate']))
+        df_left_1 = df_adherence_latest.alias("left")
+        df_right_1 = jerarquia_dialer_hist_mu_rg.alias("right")
         
-        df_unido_1 = df_adherence_latest.join(jerarquia_dialer_hist_mu_rg, join_cond_1, 'inner')
+        join_cond_1 = (col("left.muid") == col("right.mu_id")) & \
+                      (col("left.date_nice_agent_adh_summary") >= col("right.nicemu_startdate")) & \
+                      (when(col("right.nicemu_stopdate").isNull(), True)
+                       .otherwise(col("left.date_nice_agent_adh_summary") <= col("right.nicemu_stopdate")))
         
-        # CORRECCIÓN: Selección explícita
-        df_final_1 = df_unido_1.select(
-            *df_adherence_latest.columns, 
-            jerarquia_dialer_hist_mu_rg["reportnamemasterid"], 
-            jerarquia_dialer_hist_mu_rg["reportname"]
-        )
+        df_final_1 = df_left_1.join(df_right_1, join_cond_1, 'inner') \
+            .select(
+                "left.*", 
+                col("right.reportnamemasterid"), 
+                col("right.reportname")
+            )
 
         # --- Join 2: Con Report Groups to Super Groups ---
-        join_cond_2 = (df_final_1['reportnamemasterid'] == jerarquia_dialer_hist_rg_sg['reportnamemasterid']) & \
-                      (df_final_1['date_nice_agent_adh_summary'] >= jerarquia_dialer_hist_rg_sg['startdate_sg']) & \
-                      (when(jerarquia_dialer_hist_rg_sg['stopdate_sg'].isNull(), True)
-                       .otherwise(df_final_1['date_nice_agent_adh_summary'] <= jerarquia_dialer_hist_rg_sg['stopdate_sg']))
+        df_left_2 = df_final_1.alias("left")
+        df_right_2 = jerarquia_dialer_hist_rg_sg.alias("right")
+
+        join_cond_2 = (col("left.reportnamemasterid") == col("right.reportnamemasterid")) & \
+                      (col("left.date_nice_agent_adh_summary") >= col("right.startdate_sg")) & \
+                      (when(col("right.stopdate_sg").isNull(), True)
+                       .otherwise(col("left.date_nice_agent_adh_summary") <= col("right.stopdate_sg")))
         
-        df_unido_2 = df_final_1.join(jerarquia_dialer_hist_rg_sg, join_cond_2, 'inner')
-        
-        # CORRECCIÓN: Selección explícita
-        df_final = df_unido_2.select(*df_final_1.columns, jerarquia_dialer_hist_rg_sg["supergroupname"])
+        df_final = df_left_2.join(df_right_2, join_cond_2, 'inner') \
+            .select("left.*", col("right.supergroupname"))
 
         # --- 3. Limpieza y Selección Final ---
         print("Realizando limpieza y selección final...")
         uip_nice_agent_adherence_summary_d = df_final \
             .withColumn("month", month("date_nice_agent_adh_summary").cast(IntegerType())) \
             .select(
-                col("date_nice_agent_adh_summary").cast(DateType()),
-                "supergroupname",
-                "reportname",
-                "unitmanager",
-                "unitmanagerid",
-                "logonid",
-                "attribute",
-                "total_active",
-                "total_scheduled",
-                "month"
+                col("date_nice_agent_adh_summary").cast(DateType()), "supergroupname", "reportname",
+                "unitmanager", "unitmanagerid", "logonid", "attribute", "total_active",
+                "total_scheduled", "month"
             ) \
             .na.fill("") \
             .sort("date_nice_agent_adh_summary", ascending=True)
