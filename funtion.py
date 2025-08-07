@@ -894,3 +894,7 @@ output_table_mapping = {
     "table_inbound": final_table_4,
     "table_outbound": final_table_5
 }
+
+# --- PARÁMETROS DE FILTRADO ---
+# Fecha para filtrar los datos en el reporte de cifras control
+filter_date_control_figures = "2024-08-01"
