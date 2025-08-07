@@ -244,14 +244,13 @@ def nice_dialer(df_nice_agent_info, df_nice_active_forecast, df_nice_agent_adher
 def data_inbound(df_acd_call_det, df_int_agent_det, jerarquia_dialer_hist_rg_sg, jerarquia_dialer_hist_lg_rg_ib, jerarquia_dialer_hist_lob_sid):
     """
     Procesa y enriquece los datos de llamadas inbound.
-    Versión corregida para evitar errores de columnas ambiguas en Spark 3.x.
+    Versión con corrección de ambigüedad de columnas mediante alias para Spark 3.x.
     """
     try:
         print("Iniciando el procesamiento de datos Inbound...")
         TIMEZONE_OFFSET_HOURS = 6
 
         # --- 1. Preparar datos de ACDCallDetail ---
-        # (Esta sección no tiene joins, no necesita cambios)
         print("Procesando ACDCallDetail...")
         df_acd_calls = df_acd_call_det.filter(col('callstartdt') != col('callenddt')) \
             .select(
@@ -289,45 +288,48 @@ def data_inbound(df_acd_call_det, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
             .drop('LLAVE_ACD_CALL', 'LLAVE_INT_AGENT_DET') \
             .na.fill(0, subset=['agenttime', 'previewtime', 'activetime', 'wraptime', 'holdtime'])
 
-        # --- 4. Enriquecer con Jerarquías (SECCIÓN CORREGIDA) ---
-        print("Enriqueciendo con jerarquías del dialer (versión corregida para Spark 3)...")
+        # --- 4. Enriquecer con Jerarquías (SOLUCIÓN DEFINITIVA CON ALIAS) ---
+        print("Enriqueciendo con jerarquías del dialer (solución definitiva para Spark 3)...")
         
         # --- Join 1: Con LOBs to Service IDs ---
-        join_cond_1 = (df_calls_enriched['service_id'] == jerarquia_dialer_hist_lob_sid['serviceid']) & \
-                      (df_calls_enriched['record_date'] >= jerarquia_dialer_hist_lob_sid['startdate_serviceid']) & \
-                      (when(jerarquia_dialer_hist_lob_sid['stopdate_serviceid'].isNull(), True)
-                       .otherwise(df_calls_enriched['record_date'] <= jerarquia_dialer_hist_lob_sid['stopdate_serviceid']))
+        df_left_1 = df_calls_enriched.alias("left")
+        df_right_1 = jerarquia_dialer_hist_lob_sid.alias("right")
+
+        join_cond_1 = (col("left.service_id") == col("right.serviceid")) & \
+                      (col("left.record_date") >= col("right.startdate_serviceid")) & \
+                      (when(col("right.stopdate_serviceid").isNull(), True)
+                       .otherwise(col("left.record_date") <= col("right.stopdate_serviceid")))
         
-        df_unido_1 = df_calls_enriched.join(jerarquia_dialer_hist_lob_sid, join_cond_1, 'left')
-        
-        # CORRECCIÓN: Se seleccionan las columnas explícitamente para evitar ambigüedad
-        df_final_1 = df_unido_1.select(*df_calls_enriched.columns, jerarquia_dialer_hist_lob_sid['lobmasterid'])
+        df_final_1 = df_left_1.join(df_right_1, join_cond_1, 'left') \
+            .select("left.*", col("right.lobmasterid"))
 
         # --- Join 2: Con LOB Group to ReportGrp ---
-        join_cond_2 = (df_final_1['lobmasterid'] == jerarquia_dialer_hist_lg_rg_ib['lobmasterid']) & \
-                      (df_final_1['record_date'] >= jerarquia_dialer_hist_lg_rg_ib['lobtorgstartdate']) & \
-                      (when(jerarquia_dialer_hist_lg_rg_ib['lobtorgstopdate'].isNull(), True)
-                       .otherwise(df_final_1['record_date'] <= jerarquia_dialer_hist_lg_rg_ib['lobtorgstopdate']))
+        df_left_2 = df_final_1.alias("left")
+        df_right_2 = jerarquia_dialer_hist_lg_rg_ib.alias("right")
+
+        join_cond_2 = (col("left.lobmasterid") == col("right.lobmasterid")) & \
+                      (col("left.record_date") >= col("right.lobtorgstartdate")) & \
+                      (when(col("right.lobtorgstopdate").isNull(), True)
+                       .otherwise(col("left.record_date") <= col("right.lobtorgstopdate")))
                        
-        df_unido_2 = df_final_1.join(jerarquia_dialer_hist_lg_rg_ib, join_cond_2, 'left')
-        
-        # CORRECCIÓN: Se seleccionan las columnas explícitamente de nuevo
-        df_final_2 = df_unido_2.select(
-            *df_final_1.columns, 
-            jerarquia_dialer_hist_lg_rg_ib['reportnamemasterid'], 
-            jerarquia_dialer_hist_lg_rg_ib['reportname']
-        )
+        df_final_2 = df_left_2.join(df_right_2, join_cond_2, 'left') \
+            .select(
+                "left.*", 
+                col("right.reportnamemasterid"), 
+                col("right.reportname")
+            )
 
         # --- Join 3: Con Report Groups to Super Groups ---
-        join_cond_3 = (df_final_2['reportnamemasterid'] == jerarquia_dialer_hist_rg_sg['reportnamemasterid']) & \
-                      (df_final_2['record_date'] >= jerarquia_dialer_hist_rg_sg['startdate_sg']) & \
-                      (when(jerarquia_dialer_hist_rg_sg['stopdate_sg'].isNull(), True)
-                       .otherwise(df_final_2['record_date'] <= jerarquia_dialer_hist_rg_sg['stopdate_sg']))
+        df_left_3 = df_final_2.alias("left")
+        df_right_3 = jerarquia_dialer_hist_rg_sg.alias("right")
 
-        df_unido_3 = df_final_2.join(jerarquia_dialer_hist_rg_sg, join_cond_3, 'left')
-        
-        # CORRECCIÓN: Selección final explícita
-        df_final = df_unido_3.select(*df_final_2.columns, jerarquia_dialer_hist_rg_sg['supergroupname'])
+        join_cond_3 = (col("left.reportnamemasterid") == col("right.reportnamemasterid")) & \
+                      (col("left.record_date") >= col("right.startdate_sg")) & \
+                      (when(col("right.stopdate_sg").isNull(), True)
+                       .otherwise(col("left.record_date") <= col("right.stopdate_sg")))
+
+        df_final = df_left_3.join(df_right_3, join_cond_3, 'left') \
+            .select("left.*", col("right.supergroupname"))
 
         # --- 5. Limpieza y Selección Final ---
         print("Realizando limpieza final...")
