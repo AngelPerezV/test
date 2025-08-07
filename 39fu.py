@@ -355,13 +355,13 @@ def data_outbound(df_contact_event, df_int_agent_det, df_cat_dialer, jerarquia_d
                   jerarquia_dialer_hist_alm_active, jerarquia_dialer_hist_lg_rg_ob, jerarquia_dialer_hist_rg_sg):
     """
     Procesa y enriquece los datos de llamadas outbound.
-    Versión corregida para evitar errores de columnas ambiguas en Spark 3.x.
+    Versión con corrección de ambigüedad de columnas mediante alias para Spark 3.x.
     """
     try:
         print("Iniciando el procesamiento de datos Outbound...")
         TIMEZONE_OFFSET_HOURS = 6
 
-        # --- 1. Preparar datos de ContactEvent ---
+        # --- 1, 2, 3 y 4. Preparación y Joins Iniciales (Sin cambios) ---
         print("Procesando ContactEvent...")
         df_contacts = df_contact_event \
             .withColumn('time_of_contact', col('time_of_contact') - F.expr(f'INTERVAL {TIMEZONE_OFFSET_HOURS} HOURS')) \
@@ -377,17 +377,14 @@ def data_outbound(df_contact_event, df_int_agent_det, df_cat_dialer, jerarquia_d
             max(when(col("response_status") != "", col("total_number_of_records"))).alias("max_total_number_of_records_not_emp_res_sta")
         )
         df_contacts = df_contacts.join(df_max_records, ["record_date", "contact_list_name"], "left")
-
-        # --- 2. Preparar datos de InteractionAgentDetail ---
+        
         df_agent_agg = _prepare_interaction_agent_detail(df_int_agent_det, TIMEZONE_OFFSET_HOURS)
-
-        # --- 3. Unir ContactEvent con InteractionAgentDetail ---
+        
         print("Uniendo datos de contactos y agentes...")
         df_outbound_base = df_contacts.withColumn('LLAVE_CONTACT_EVENT', concat_ws('-', 'record_date', 'interval_hour', 'seqnum', 'agent_login_name')) \
             .join(df_agent_agg, col('LLAVE_CONTACT_EVENT') == col('LLAVE_INT_AGENT_DET'), 'left') \
             .drop('LLAVE_CONTACT_EVENT', 'LLAVE_INT_AGENT_DET')
 
-        # --- 4. Preparar y unir con Catalogo Dialer ---
         print("Uniendo con Catálogo Dialer...")
         df_cat_saturacion = df_cat_dialer.groupBy(trim(col("aspect_list_name")).alias("aspect_list_name")) \
                                          .agg(max("saturacion").alias("saturacion"))
@@ -401,39 +398,41 @@ def data_outbound(df_contact_event, df_int_agent_det, df_cat_dialer, jerarquia_d
                                               .drop('aspect_list_name', 'disposition')
 
         # =================================================================================
-        # --- 5. Enriquecer con Jerarquías (SECCIÓN CORREGIDA) ---
+        # --- 5. Enriquecer con Jerarquías (SOLUCIÓN DEFINITIVA CON ALIAS) ---
         # =================================================================================
         print("Uniendo con jerarquías (versión corregida para Spark 3)...")
         
         # --- Join 1: Con LOBs to ALMLists ---
-        df_jerarquia_1 = jerarquia_dialer_hist_lob_alm.select('lobmasterid', 'groupname', 'listname').distinct()
-        df_unido_1 = df_outbound_catalog.join(df_jerarquia_1, df_outbound_catalog['contact_list_name'] == df_jerarquia_1['listname'], 'left')
-        # CORRECCIÓN: Selección explícita
-        df_final_1 = df_unido_1.select(*df_outbound_catalog.columns, df_jerarquia_1['lobmasterid'], df_jerarquia_1['groupname'])
+        df_left_1 = df_outbound_catalog.alias("left")
+        df_right_1 = jerarquia_dialer_hist_lob_alm.select('lobmasterid', 'groupname', 'listname').distinct().alias("right")
+        df_final_1 = df_left_1.join(df_right_1, col("left.contact_list_name") == col("right.listname"), 'left') \
+            .select("left.*", col("right.lobmasterid"), col("right.groupname"))
 
         # --- Join 2: Con ALMList Active Goals ---
-        df_jerarquia_2 = jerarquia_dialer_hist_alm_active.select('listname_active', 'goalhigh_active').distinct()
-        df_unido_2 = df_final_1.join(df_jerarquia_2, df_final_1['contact_list_name'] == df_jerarquia_2['listname_active'], 'left')
-        # CORRECCIÓN: Selección explícita
-        df_final_2 = df_unido_2.select(*df_final_1.columns, df_jerarquia_2['goalhigh_active'])
+        df_left_2 = df_final_1.alias("left")
+        df_right_2 = jerarquia_dialer_hist_alm_active.select('listname_active', 'goalhigh_active').distinct().alias("right")
+        df_final_2 = df_left_2.join(df_right_2, col("left.contact_list_name") == col("right.listname_active"), 'left') \
+            .select("left.*", col("right.goalhigh_active"))
         
         # --- Join 3: Con LOB Group to ReportGrp (Outbound) ---
-        join_cond_3 = (df_final_2['lobmasterid'] == jerarquia_dialer_hist_lg_rg_ob['lobmasterid']) & \
-                      (df_final_2['record_date'] >= jerarquia_dialer_hist_lg_rg_ob['lobtorgstartdate']) & \
-                      (when(jerarquia_dialer_hist_lg_rg_ob['lobtorgstopdate'].isNull(), True)
-                       .otherwise(df_final_2['record_date'] <= jerarquia_dialer_hist_lg_rg_ob['lobtorgstopdate']))
-        df_unido_3 = df_final_2.join(jerarquia_dialer_hist_lg_rg_ob, join_cond_3, 'left')
-        # CORRECCIÓN: Selección explícita
-        df_final_3 = df_unido_3.select(*df_final_2.columns, jerarquia_dialer_hist_lg_rg_ob['reportnamemasterid'], jerarquia_dialer_hist_lg_rg_ob['reportname'])
+        df_left_3 = df_final_2.alias("left")
+        df_right_3 = jerarquia_dialer_hist_lg_rg_ob.alias("right")
+        join_cond_3 = (col("left.lobmasterid") == col("right.lobmasterid")) & \
+                      (col("left.record_date") >= col("right.lobtorgstartdate")) & \
+                      (when(col("right.lobtorgstopdate").isNull(), True)
+                       .otherwise(col("left.record_date") <= col("right.lobtorgstopdate")))
+        df_final_3 = df_left_3.join(df_right_3, join_cond_3, 'left') \
+            .select("left.*", col("right.reportnamemasterid"), col("right.reportname"))
 
         # --- Join 4: Con Report Groups to Super Groups ---
-        join_cond_4 = (df_final_3['reportnamemasterid'] == jerarquia_dialer_hist_rg_sg['reportnamemasterid']) & \
-                      (df_final_3['record_date'] >= jerarquia_dialer_hist_rg_sg['startdate_sg']) & \
-                      (when(jerarquia_dialer_hist_rg_sg['stopdate_sg'].isNull(), True)
-                       .otherwise(df_final_3['record_date'] <= jerarquia_dialer_hist_rg_sg['stopdate_sg']))
-        df_unido_4 = df_final_3.join(jerarquia_dialer_hist_rg_sg, join_cond_4, 'left')
-        # CORRECCIÓN: Selección explícita
-        df_final = df_unido_4.select(*df_final_3.columns, jerarquia_dialer_hist_rg_sg['supergroupname'])
+        df_left_4 = df_final_3.alias("left")
+        df_right_4 = jerarquia_dialer_hist_rg_sg.alias("right")
+        join_cond_4 = (col("left.reportnamemasterid") == col("right.reportnamemasterid")) & \
+                      (col("left.record_date") >= col("right.startdate_sg")) & \
+                      (when(col("right.stopdate_sg").isNull(), True)
+                       .otherwise(col("left.record_date") <= col("right.stopdate_sg")))
+        df_final = df_left_4.join(df_right_4, join_cond_4, 'left') \
+            .select("left.*", col("right.supergroupname"))
 
         # --- 6. Limpieza y Selección Final ---
         print("Realizando limpieza y selección final...")
@@ -457,7 +456,6 @@ def data_outbound(df_contact_event, df_int_agent_det, df_cat_dialer, jerarquia_d
         import traceback
         traceback.print_exc()
         return None
-
 def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg, 
                jerarquia_dialer_hist_mu_rg, df_nice_agent_info):
     """
