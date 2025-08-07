@@ -827,15 +827,16 @@ def principal():
 
         # --- 6. CÁLCULO DE CIFRAS CONTROL ---
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Stage << Calculating control figures >>")
-        
+
         control_figures_data = [
+            # CORRECCIÓN: Se cambia > por >= para incluir la fecha del filtro
             ("Adherence Summary", table_nice_adh_attr_summary.filter(col("date_nice_agent_adh_summary") >= cf.filter_date_control_figures).count()),
             ("Staff", table_staff.filter(col("record_date") >= cf.filter_date_control_figures).count()),
             ("Forecast", table_nice_act_forecast.filter(col("date_nice_active_fcst") >= cf.filter_date_control_figures).count()),
             ("Inbound", table_inbound.filter(col("record_date") >= cf.filter_date_control_figures).count()),
-            ("Outbound", table_outbound.count())
+            ("Outbound", table_outbound.count()) # Outbound no tiene filtro de fecha en tu código original
         ]
-        
+
         DF_Control = spark.createDataFrame(control_figures_data, ["DataFrame", "Registros"])
         print("Control Figures:")
         DF_Control.show(truncate=False)
