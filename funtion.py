@@ -856,9 +856,19 @@ def principal():
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Ending execution of {cf.processName}")
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Total execution time: {total_time.seconds} seconds")
         
-        # Enviar notificación final
-        # notification_mail(cf.idProcess, cf.processName, cf.sender, cf.receivers, cf.fileName_results, cf.nameLog, DF_Control)
-        
+        # =======================================================
+        # CORRECCIÓN AQUÍ: Comprobar si DF_Control existe antes de usarlo
+        # =======================================================
+        if DF_Control is not None:
+            # Si el DataFrame de control se creó, envía la notificación normal.
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Sending success notification with control figures.")
+            # notification_mail(cf.idProcess, cf.processName, cf.sender, cf.receivers, cf.fileName_results, cf.nameLog, DF_Control)
+        else:
+            # Si DF_Control es None, significa que el proceso falló antes.
+            # Opcionalmente, aquí podrías enviar una notificación de error.
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Skipping notification mail because DF_Control was not generated due to an earlier error.")
+            # mail.send_notification(cf.sender, cf.receivers, f"ERROR in {cf.processName}", "Process failed, control figures not available.")
+
         if spark:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] INFO: Stopping SparkSession.")
             spark.stop()
