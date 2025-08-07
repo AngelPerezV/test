@@ -460,7 +460,7 @@ def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
                jerarquia_dialer_hist_mu_rg, df_nice_agent_info):
     """
     Procesa y enriquece los datos de actividad de agentes (staff).
-    Versión corregida para evitar errores de columnas ambiguas en Spark 3.x.
+    Versión corregida para evitar errores de columnas ambiguas y de 'record_date'.
     """
     try:
         print("Iniciando el procesamiento de datos de Staff...")
@@ -482,10 +482,18 @@ def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
                 sum('totalparkidletime').alias('totalparkidletime'), sum('totalparktime').alias('totalparktime')
             )
 
-        # --- 2. Preparar datos de InteractionAgentDetail ---
-        df_agent_agg_staff = _prepare_interaction_agent_detail(df_int_agent_det, TIMEZONE_OFFSET_HOURS) \
-            .withColumn("LLAVE_INT_AGENT_DET", concat_ws('-', col("record_date"), col("interval_hour"), col("user_id"))) \
-            .groupBy("LLAVE_INT_AGENT_DET") \
+        # --- 2. Preparar datos de InteractionAgentDetail para Staff (LÓGICA CORREGIDA) ---
+        print("Preparando datos de InteractionAgentDetail para Staff...")
+        df_agent_details_staff = df_int_agent_det.filter(col('agenttime') > 0) \
+            .withColumn('interactionstartdt', col('interactionstartdt') - F.expr(f'INTERVAL {TIMEZONE_OFFSET_HOURS} HOURS')) \
+            .withColumn('user_id', lower(col('user_id'))) \
+            .withColumn('record_date', to_date('interactionstartdt')) \
+            .withColumn('hour', hour('interactionstartdt')) \
+            .withColumn('minute', minute('interactionstartdt')) \
+            .withColumn('interval_hour', concat(col('hour'), when(col('minute') < 30, ":00").otherwise(":30")))
+
+        df_agent_agg_staff = df_agent_details_staff \
+            .groupBy("record_date", "interval_hour", "user_id") \
             .agg(
                 sum('agenttime').alias('agenttime'), sum('activetime').alias('activetime'),
                 sum('wraptime').alias('wraptime'), sum('previewtime').alias('previewtime'),
@@ -494,11 +502,11 @@ def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
 
         # --- 3. Unir Activity con Interaction Details ---
         print("Uniendo datos de actividad e interacciones...")
-        df_staff_base = df_activity.withColumn('LLAVE_AGENT_ACT', concat_ws('-', 'record_date', 'interval_hour', 'user_id')) \
-            .join(df_agent_agg_staff, col('LLAVE_AGENT_ACT') == col('LLAVE_INT_AGENT_DET'), 'left') \
-            .drop('LLAVE_AGENT_ACT', 'LLAVE_INT_AGENT_DET')
+        join_keys_staff = ["record_date", "interval_hour", "user_id"]
+        df_staff_base = df_activity.join(df_agent_agg_staff, join_keys_staff, 'left')
 
         # --- 4. Preparar y unir con Nice Agent Info ---
+        # (El resto de la función sigue igual que la versión corregida anterior)
         print("Procesando y uniendo con Nice Agent Info...")
         window_spec = Window.partitionBy(col("agent_info_id")).orderBy(col("date_nice_agent_info").desc(), col("process_date").desc())
         df_nice_latest = df_nice_agent_info \
@@ -512,38 +520,27 @@ def data_staff(df_agent_act_sum, df_int_agent_det, jerarquia_dialer_hist_rg_sg,
             .join(df_nice_latest, col('LLAVE_STAFF') == col('LLAVE_NICE_AGENT_INFO'), 'left') \
             .drop('LLAVE_STAFF', 'LLAVE_NICE_AGENT_INFO')
 
-        # =================================================================================
-        # --- 5. Unir con Jerarquías (SECCIÓN CORREGIDA) ---
-        # =================================================================================
-        print("Uniendo con jerarquías (versión corregida para Spark 3)...")
-
-        # --- Join 1: Con NICEMU-WorkSeg-ReportGrp Config ---
-        join_cond_1 = (df_staff_base_nice['muid'] == jerarquia_dialer_hist_mu_rg['mu_id']) & \
-                      (df_staff_base_nice['record_date'] >= jerarquia_dialer_hist_mu_rg['nicemu_startdate']) & \
-                      (when(jerarquia_dialer_hist_mu_rg['nicemu_stopdate'].isNull(), True)
-                       .otherwise(df_staff_base_nice['record_date'] <= jerarquia_dialer_hist_mu_rg['nicemu_stopdate']))
+        # --- 5. Unir con Jerarquías ---
+        # (Se aplica la corrección de alias para Spark 3)
+        print("Uniendo con jerarquías...")
+        df_left_1 = df_staff_base_nice.alias("left")
+        df_right_1 = jerarquia_dialer_hist_mu_rg.alias("right")
+        join_cond_1 = (col("left.muid") == col("right.mu_id")) & \
+                      (col("left.record_date") >= col("right.nicemu_startdate")) & \
+                      (when(col("right.nicemu_stopdate").isNull(), True).otherwise(col("left.record_date") <= col("right.nicemu_stopdate")))
+        df_final_1 = df_left_1.join(df_right_1, join_cond_1, 'left') \
+            .select("left.*", col("right.reportnamemasterid"), col("right.reportname"))
         
-        df_unido_1 = df_staff_base_nice.join(jerarquia_dialer_hist_mu_rg, join_cond_1, 'left')
-        
-        # CORRECCIÓN: Selección explícita
-        df_final_1 = df_unido_1.select(
-            *df_staff_base_nice.columns,
-            jerarquia_dialer_hist_mu_rg['reportnamemasterid'],
-            jerarquia_dialer_hist_mu_rg['reportname']
-        )
-        
-        # --- Join 2: Con Report Groups to Super Groups ---
-        join_cond_2 = (df_final_1['reportnamemasterid'] == jerarquia_dialer_hist_rg_sg['reportnamemasterid']) & \
-                      (df_final_1['record_date'] >= jerarquia_dialer_hist_rg_sg['startdate_sg']) & \
-                      (when(jerarquia_dialer_hist_rg_sg['stopdate_sg'].isNull(), True)
-                       .otherwise(df_final_1['record_date'] <= jerarquia_dialer_hist_rg_sg['stopdate_sg']))
-
-        df_unido_2 = df_final_1.join(jerarquia_dialer_hist_rg_sg, join_cond_2, 'left')
-        
-        # CORRECCIÓN: Selección explícita
-        df_final = df_unido_2.select(*df_final_1.columns, jerarquia_dialer_hist_rg_sg['supergroupname'])
+        df_left_2 = df_final_1.alias("left")
+        df_right_2 = jerarquia_dialer_hist_rg_sg.alias("right")
+        join_cond_2 = (col("left.reportnamemasterid") == col("right.reportnamemasterid")) & \
+                      (col("left.record_date") >= col("right.startdate_sg")) & \
+                      (when(col("right.stopdate_sg").isNull(), True).otherwise(col("left.record_date") <= col("right.stopdate_sg")))
+        df_final = df_left_2.join(df_right_2, join_cond_2, 'left') \
+            .select("left.*", col("right.supergroupname"))
 
         # --- 6. Limpieza y Selección Final ---
+        # ... (código sin cambios)
         print("Realizando limpieza final...")
         uip_staff_d = df_final.withColumn('month', month('record_date')) \
             .withColumn('supergroupname', when(col('supergroupname').isNull() | (col('supergroupname') == ''), "Sin Asignar").otherwise(col('supergroupname'))) \
