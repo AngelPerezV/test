@@ -875,3 +875,22 @@ def principal():
 
 if __name__ == "__main__":
     principal()
+
+
+# ------ Ouput Tables-
+final_table_1 = 'a_oprn_cc_nice_adh_attr_summary_dialer_d'
+final_table_2 = 'a_oprn_cc_staff_dialer_d'
+final_table_3 = 'a_oprn_cc_nice_act_forecast_dialer_d'
+final_table_4 = 'a_oprn_cc_inbound_dialer_d'
+final_table_5 = 'a_oprn_cc_outbound_dialer_d'
+
+# ======================================================================
+# CORRECCIÓN: Crear el diccionario que main.py necesita usando tus variables
+# ======================================================================
+output_table_mapping = {
+    "table_nice_adh_attr_summary": final_table_1,
+    "table_staff": final_table_2,
+    "table_nice_act_forecast": final_table_3,
+    "table_inbound": final_table_4,
+    "table_outbound": final_table_5
+}
