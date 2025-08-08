@@ -730,3 +730,43 @@ from pyspark.sql.functions import (col, to_date, lower, to_timestamp, hour, minu
                                    when, lit, sum, trim, max, concat_ws, month, row_number, 
                                    date_format, year)
 from pyspark.sql.types import DateType, IntegerType, FloatType
+
+
+
+full_table_name = f"{schema_name}.{table_name}"
+        
+        if df is None:
+            list_errors.append(table_name)
+            print(f"ADVERTENCIA: El DataFrame para la tabla '{table_name}' es None. Omitiendo la inserción.")
+            return
+
+        try:
+            if not spark.catalog.tableExists(full_table_name):
+                raise ValueError(f"La tabla '{full_table_name}' no existe en el catálogo de Hive.")
+            
+            print(f"INFO: Insertando datos en la tabla {full_table_name}...")
+            df.write.mode("overwrite").insertInto(full_table_name, overwrite=True)
+            print(f"INFO: Inserción en la tabla '{table_name}' completada.")
+            df.unpersist()
+        except Exception as e:
+            list_errors.append(table_name)
+            print(f"ERROR: Fallo al insertar en la tabla '{table_name}': {e}")
+
+    # Reemplaza 'nombre_esquema' con el nombre real de tu esquema
+    schema_name = 'nombre_esquema'
+
+    # Llama a la función de inserción para cada DataFrame
+    insert_into_existing_table(output_dataframes.get("nice_adh_attr_summary"), 'nombre_tabla_nice_adh_attr_summary', schema_name, listNotInsert)
+    insert_into_existing_table(output_dataframes.get("staff"), 'nombre_tabla_staff', schema_name, listNotInsert)
+    insert_into_existing_table(output_dataframes.get("nice_act_forecast"), 'nombre_tabla_nice_act_forecast', schema_name, listNotInsert)
+    insert_into_existing_table(output_dataframes.get("inbound"), 'nombre_tabla_inbound', schema_name, listNotInsert)
+    insert_into_existing_table(output_dataframes.get("outbound"), 'nombre_tabla_outbound', schema_name, listNotInsert)
+    insert_into_existing_table(output_dataframes.get("nice_dialer_final"), 'nombre_tabla_nice_dialer_final', schema_name, listNotInsert)
+
+    if len(listNotInsert) > 0:
+        error_msg = f"No se pudo insertar en las siguientes tablas: {listNotInsert}"
+        print(f"FATAL: {error_msg}")
+        # logger.end_process(mail, error_msg)
+        sys.exit(1)
+    else:
+        print(f"INFO: All tables inserted successfully.")
