@@ -39,3 +39,12 @@
         # 5. Guardar el DataFrame final como un atributo de la clase para ser usado después
         self.df_final_con_factor = df_final.cache()
         print("Módulo Factor: Cálculo del Factor Multiplicativo completado.")
+
+
+"""
+        Constructor de la clase.
+        :param fecha_inicio: La fecha de inicio para las consultas.
+        :param fecha_fin: La fecha de fin para las consultas.
+        :param df_input: El DataFrame que resulta del módulo de Reglas (nueva_union).
+        :param data_ops_bpa: El objeto de conexión a Spark (tu clase bnmxspark).
+        """
