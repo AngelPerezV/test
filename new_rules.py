@@ -48,3 +48,9 @@
         :param df_input: El DataFrame que resulta del módulo de Reglas (nueva_union).
         :param data_ops_bpa: El objeto de conexión a Spark (tu clase bnmxspark).
         """
+
+
+  df_final = df_final.withColumn('Clasificacion_Bucket',
+        sf.when(sf.col('dpd_bucket') > sf.col('dpd_bucket_sug'), 'RB')
+          .when(sf.col('dpd_bucket') < sf.col('dpd_bucket_sug'), 'LE')
+          .otherwise('ST') # Si son iguales
