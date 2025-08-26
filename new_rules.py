@@ -54,3 +54,19 @@
         sf.when(sf.col('dpd_bucket') > sf.col('dpd_bucket_sug'), 'RB')
           .when(sf.col('dpd_bucket') < sf.col('dpd_bucket_sug'), 'LE')
           .otherwise('ST') # Si son iguales
+
+
+    DataOpsBPA.write_log("Start calculating Multiplicative Factor")
+    nombre_factor = "factor_" + str(z)
+    
+    # Creamos la instancia con el orden de parámetros correcto
+    valor_factor = CalculoFactor.Factor(fechas_iniciales[i], fechas_finales[j], valor_regla.nueva_union, DataOpsBPA)
+    
+    # Ejecutamos el método que hace todos los cálculos (incluida la nueva regla RB/ST/LE)
+    valor_factor.calcular_factor()
+    
+    # Guardamos el objeto con los resultados en su diccionario
+    dicc_factores[nombre_factor] = valor_factor
+    
+    DataOpsBPA.write_log("Finished calculating Multiplicative Factor")
+    step_number = step_number + 1
