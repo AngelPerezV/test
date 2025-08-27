@@ -75,13 +75,27 @@ class AnalizadorEstadistico:
             
     def realizar_anova_dos_factores(self, var_dependiente, factor1, factor2, alpha=0.05):
         # ... (El método completo que ya teníamos) ...
+        
         print(f"\n--- Ejecutando ANOVA de Dos Factores para '{var_dependiente}' por '{factor1}' y '{factor2}' ---")
-        df_clean = self.df[[var_dependiente, factor1, factor2]].dropna()
+        if not all(col in self.df.columns for col in [var_dependiente, factor1, factor2]):
+            raise ValueError("Una o más columnas no se encuentran en el DataFrame.")
+        
+        # 2. LIMPIEZA ROBUSTA: Reemplazar 'inf' con 'NaN' y luego eliminar filas con 'NaN'
+        df_temp = self.df[[var_dependiente, factor1, factor2]].copy()
+        df_temp.replace([np.inf, -np.inf], np.nan, inplace=True)
+        df_clean = df_temp.dropna()
+        
         if len(df_clean) < len(self.df):
-            print(f"Advertencia: Se eliminaron {len(self.df) - len(df_clean)} filas con valores faltantes.")
+            print(f"Advertencia: Se eliminaron {len(self.df) - len(df_clean)} filas con valores faltantes o infinitos.")
+        
+        if df_clean.empty:
+            print("❌ Error: No hay datos válidos para realizar el ANOVA después de la limpieza.")
+            return
         formula = f"{var_dependiente} ~ C({factor1}) + C({factor2}) + C({factor1}):C({factor2})"
         model = ols(formula, data=df_clean).fit()
         anova_table = sm.stats.anova_lm(model, typ=2)
+
+
         print("\n--- Tabla de Resultados del ANOVA ---")
         display(anova_table)
         print("\n--- Interpretación de los Resultados (p-valores) ---")
