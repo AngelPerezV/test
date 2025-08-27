@@ -378,3 +378,89 @@ class AnovaDosFactores:
         plt.title(f'Boxplot de {self.var_dependiente} por {self.factor1} y {self.factor2}')
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.show()
+
+
+
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+from scipy import stats
+
+class AnalizadorEstadistico:
+    """
+    Un kit de herramientas para realizar diferentes análisis estadísticos
+    sobre un DataFrame de Pandas.
+    """
+    def __init__(self, df):
+        """
+        Inicializa el analizador con un DataFrame.
+        """
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError("La entrada debe ser un DataFrame de Pandas.")
+        self.df = df
+        print("Analizador Estadístico listo.")
+
+    def realizar_prueba_t(self, var_dependiente, var_grupo, alpha=0.05):
+        """
+        Realiza una Prueba t de Student para comparar las medias de DOS grupos.
+        
+        :param var_dependiente: Columna numérica a medir.
+        :param var_grupo: Columna categórica que define los dos grupos.
+        """
+        print(f"\n--- Ejecutando Prueba t de Student para '{var_dependiente}' por '{var_grupo}' ---")
+        
+        grupos = self.df[var_grupo].unique()
+        if len(grupos) != 2:
+            print(f"❌ Error: La columna '{var_grupo}' debe tener exactamente 2 grupos para una Prueba t. Encontrados: {len(grupos)}.")
+            return
+
+        grupo1 = self.df[self.df[var_grupo] == grupos[0]][var_dependiente]
+        grupo2 = self.df[self.df[var_grupo] == grupos[1]][var_dependiente]
+
+        t_stat, p_value = stats.ttest_ind(grupo1, grupo2, nan_policy='omit')
+        
+        print(f"Estadístico t: {t_stat:.4f}, Valor p: {p_value:.4f}")
+        if p_value < alpha:
+            print("✅ Conclusión: La diferencia entre los promedios de los dos grupos es estadísticamente significativa.")
+        else:
+            print("❌ Conclusión: No hay evidencia de una diferencia significativa entre los dos grupos.")
+
+    def realizar_anova_un_factor(self, var_dependiente, var_grupo, alpha=0.05):
+        """
+        Realiza un ANOVA de un factor para comparar las medias de TRES O MÁS grupos.
+        
+        :param var_dependiente: Columna numérica a medir.
+        :param var_grupo: Columna categórica que define los grupos.
+        """
+        print(f"\n--- Ejecutando ANOVA de Un Factor para '{var_dependiente}' por '{var_grupo}' ---")
+        
+        grupos_unicos = self.df[var_grupo].unique()
+        if len(grupos_unicos) < 3:
+            print(f"❌ Error: Se recomienda usar ANOVA con 3 o más grupos. Encontrados: {len(grupos_unicos)}. Considera usar una Prueba t.")
+            return
+
+        samples = [self.df[self.df[var_grupo] == grupo][var_dependiente].dropna() for grupo in grupos_unicos]
+        
+        f_stat, p_value = stats.f_oneway(*samples)
+        
+        print(f"Estadístico F: {f_stat:.4f}, Valor p: {p_value:.4f}")
+        if p_value < alpha:
+            print("✅ Conclusión: Existe una diferencia significativa entre los promedios de al menos dos de los grupos.")
+            print("   >> Se recomienda realizar una prueba post-hoc (ej. Tukey HSD) para ver qué pares son diferentes.")
+        else:
+            print("❌ Conclusión: No hay evidencia de una diferencia significativa entre los promedios de los grupos.")
+            
+    def realizar_anova_dos_factores(self, var_dependiente, factor1, factor2):
+        """
+        Realiza un ANOVA de dos factores completo, incluyendo la interacción.
+        """
+        print(f"\n--- Ejecutando ANOVA de Dos Factores para '{var_dependiente}' por '{factor1}' y '{factor2}' ---")
+        
+        formula = f"{var_dependiente} ~ C({factor1}) + C({factor2}) + C({factor1}):C({factor2})"
+        model = ols(formula, data=self.df).fit()
+        anova_table = sm.stats.anova_lm(model, typ=2)
+        
+        print("Tabla de Resultados del ANOVA:")
+        display(anova_table)
+        # Aquí podrías añadir la interpretación automática y las visualizaciones si lo deseas.
