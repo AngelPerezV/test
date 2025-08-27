@@ -122,3 +122,21 @@ analisis.interpretar_resultados()
 
 # 5. Visualizar la interacción
 analisis.graficar_interaccion()
+
+
+
+# (Esto iría dentro de la definición de la clase AnovaDosFactores)
+
+    def graficar_boxplot(self):
+        """
+        Crea un boxplot para visualizar las distribuciones de los grupos.
+        """
+        print("\nGenerando boxplot...")
+        plt.figure(figsize=(10, 7))
+        sns.boxplot(data=self.df, x=self.factor1, y=self.var_dependiente, hue=self.factor2)
+        plt.title(f'Boxplot de {self.var_dependiente} por {self.factor1} y {self.factor2}')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+
+# Y lo llamarías al final
+# analisis_real.graficar_boxplot()
