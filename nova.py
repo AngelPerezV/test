@@ -143,3 +143,53 @@ class AnalizadorEstadistico:
             print("   >> Esto puede pasar si las columnas de factores tienen un solo valor después de limpiar los datos.")
             print("   >> Revisa las características de tus datos limpios a continuación:")
             display(df_clean.describe(include='all'))
+
+
+            import pandas as pd
+import numpy as np
+
+# --- 1. Crear un DataFrame de ejemplo con el problema ---
+#    - 'ventas_ok' es numérica y limpia.
+#    - 'unidades_mal' debería ser numérica, pero tiene texto.
+#    - 'region' es de texto y está bien que lo sea.
+fechas = pd.to_datetime(pd.date_range(start='2024-01-15', periods=4, freq='D'))
+df = pd.DataFrame({
+    'ventas_ok': [100.5, 150.2, 120.0, 200.8],
+    'unidades_mal': ['50', '45', 'No Registrado', '30,0'],
+    'region': ['Norte', 'Sur', 'Norte', 'Este']
+}, index=fechas)
+
+print("--- DataFrame Original ---")
+display(df)
+print("\n--- Tipos de Datos Originales ---")
+df.info()
+# Nota como 'unidades_mal' es de tipo 'object'
+
+
+# --- 2. Diagnóstico: Encontrar la columna que falla ---
+print("\n--- Buscando columnas problemáticas ---")
+for columna in df.columns:
+    # Solo intentamos convertir columnas que no sean ya numéricas
+    if df[columna].dtype == 'object':
+        # Intentamos la conversión forzando errores a NaN
+        conversion_intento = pd.to_numeric(df[columna], errors='coerce')
+        
+        # Si la conversión generó algún NaN, encontramos una columna problemática
+        if conversion_intento.isnull().any():
+            print(f"🚨 ¡Problema encontrado en la columna '{columna}'!")
+
+
+# --- 3. Limpiar la columna identificada ---
+# Basado en el diagnóstico, sabemos que 'unidades_mal' es el problema.
+# La limpiamos y convertimos.
+print("\n--- Limpiando la columna 'unidades_mal' ---")
+df['unidades_mal'] = df['unidades_mal'].str.replace(',', '.', regex=False) # Reemplazar coma por punto
+df['unidades_mal'] = pd.to_numeric(df['unidades_mal'], errors='coerce')
+df.fillna(0, inplace=True) # Rellenamos el 'No Registrado' que se convirtió en NaN
+
+
+# --- 4. Ejecutar resample() de nuevo ---
+# Ahora que TODAS las columnas numéricas están limpias, el comando funcionará
+print("\n--- Resample Exitoso ---")
+resumen_semanal = df.resample('W').mean()
+display(resumen_semanal)
