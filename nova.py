@@ -249,3 +249,44 @@ df_limpio = limpiar_y_convertir_dataframe(df_sucio)
 # 3. Revisar los resultados
 print("\n--- DataFrame Limpio ---")
 df_limpio.info()
+
+
+def limpiar_y_convertir_dataframe_robusto(df):
+    """
+    Versión mejorada que primero limpia las columnas de texto y luego
+    intenta convertirlas a un formato numérico.
+
+    :param df: El DataFrame de Pandas a limpiar.
+    :return: Un nuevo DataFrame con las columnas limpias y convertidas.
+    """
+    print("--- Iniciando limpieza automática robusta ---")
+    df_limpio = df.copy()
+    
+    for columna in df_limpio.columns:
+        # Solo nos interesan las columnas de tipo 'object' (texto)
+        if pd.api.types.is_object_dtype(df_limpio[columna]):
+            print(f"Analizando la columna de texto '{columna}'...")
+            
+            # 1. Limpieza primero: creamos una versión temporal limpia de la columna
+            #    Quitamos espacios, comas, y símbolos de moneda comunes
+            try:
+                columna_temporal_limpia = df_limpio[columna].str.strip().str.replace('[$,€]', '', regex=True)
+            except AttributeError:
+                # Esto puede pasar si la columna 'object' contiene datos no-string (ej. números mezclados)
+                print(f"  >> No se pudo aplicar limpieza de texto a '{columna}'. Se omite.")
+                continue
+
+            # 2. Intentamos la conversión en la versión limpia
+            conversion_intento = pd.to_numeric(columna_temporal_limpia, errors='coerce')
+            
+            # 3. Verificamos si la conversión fue exitosa en la mayoría de los casos
+            #    (Si al menos un valor se pudo convertir, procedemos)
+            if conversion_intento.notna().any():
+                print(f"  >> ¡Conversión exitosa! La columna '{columna}' ahora es numérica.")
+                # Reemplazamos la columna original con la versión numérica
+                df_limpio[columna] = conversion_intento
+            else:
+                print(f"  >> Se mantuvo como texto. No parece ser una columna numérica.")
+                
+    print("\n--- Limpieza automática finalizada ---")
+    return df_limpio
