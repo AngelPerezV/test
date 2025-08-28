@@ -193,3 +193,59 @@ df.fillna(0, inplace=True) # Rellenamos el 'No Registrado' que se convirtió en 
 print("\n--- Resample Exitoso ---")
 resumen_semanal = df.resample('W').mean()
 display(resumen_semanal)
+
+
+import pandas as pd
+import numpy as np
+
+def limpiar_y_convertir_dataframe(df):
+    """
+    Itera sobre un DataFrame y convierte automáticamente las columnas
+    de tipo 'object' que parezcan numéricas a un formato numérico.
+    
+    :param df: El DataFrame de Pandas a limpiar.
+    :return: Un nuevo DataFrame con las columnas limpias y convertidas.
+    """
+    print("--- Iniciando limpieza automática del DataFrame ---")
+    df_limpio = df.copy() # Trabajar sobre una copia para no modificar el original
+    
+    for columna in df_limpio.columns:
+        # Solo nos interesan las columnas de tipo 'object'
+        if df_limpio[columna].dtype == 'object':
+            print(f"Analizando columna '{columna}' (tipo object)...")
+            
+            # Intentar la conversión, forzando errores a NaN
+            conversion_intento = pd.to_numeric(df_limpio[columna], errors='coerce')
+            
+            # Calcular cuántos valores no eran numéricos
+            num_nulos = conversion_intento.isnull().sum()
+            total_valores = len(df_limpio[columna])
+            
+            # Si casi todos los valores se pudieron convertir, asumimos que es una columna numérica "sucia"
+            # (El umbral del 90% es ajustable)
+            if num_nulos < total_valores * 0.1: # Si menos del 10% de los valores fallaron
+                print(f"  >> ¡Conversión exitosa! La columna '{columna}' ahora es numérica.")
+                df_limpio[columna] = conversion_intento
+            else:
+                print(f"  >> Se mantuvo como texto. No parece ser una columna numérica.")
+                
+    print("\n--- Limpieza automática finalizada ---")
+    return df_limpio
+
+# --- Ejemplo de Uso ---
+# 1. DataFrame sucio con varios tipos de problemas
+df_sucio = pd.DataFrame({
+    'id_producto': ['SKU-001', 'SKU-002', 'SKU-003'],
+    'precio': ['$1,500.50', '€2,100.20', '850'],
+    'stock': ['50', '45', 'No Registrado'],
+    'valoracion': ['4.5', '3.8', '5.0']
+})
+print("--- DataFrame Original ---")
+df_sucio.info()
+
+# 2. Aplicar la función de limpieza automática
+df_limpio = limpiar_y_convertir_dataframe(df_sucio)
+
+# 3. Revisar los resultados
+print("\n--- DataFrame Limpio ---")
+df_limpio.info()
