@@ -452,3 +452,30 @@ class AnalizadorEstadistico:
         print("\n--- Generando Visualizaciones ---")
         plt.figure(figsize=(10, 7)); sns.boxplot(data=df_clean, x=factor1, y=var_dependiente, hue=factor2); plt.title(f'Boxplot de {var_dependiente} por {factor1} y {factor2}'); plt.xlabel(factor1); plt.ylabel(var_dependiente); plt.grid(True, linestyle='--', alpha=0.6); plt.show()
         plt.figure(figsize=(8, 6)); sns.pointplot(data=df_clean, x=factor1, y=var_dependiente, hue=factor2, dodge=True, errorbar=None); plt.title(f'Gráfico de Interacción entre {factor1} y {factor2}'); plt.xlabel(factor1); plt.ylabel(f'Media de {var_dependiente}'); plt.grid(True, linestyle='--', alpha=0.6); plt.show()
+
+        # (Esto iría dentro de la definición de la clase AnalizadorEstadistico)
+
+    def probar_normalidad_shapiro_por_grupo(self, var_dependiente, var_grupo, alpha=0.05):
+        """
+        Realiza la prueba de Shapiro-Wilk para cada subgrupo definido por una columna categórica.
+        """
+        print(f"\n--- Prueba de Normalidad (Shapiro-Wilk) por Grupo para '{var_dependiente}' por '{var_grupo}' ---")
+        print("H0: La muestra de cada grupo proviene de una distribución normal.")
+        
+        df_clean = self.df[[var_dependiente, var_grupo]].dropna()
+        
+        for nombre_grupo, datos_grupo in df_clean.groupby(var_grupo):
+            datos = datos_grupo[var_dependiente]
+            
+            if len(datos) < 3:
+                print(f"\nGrupo '{nombre_grupo}': ❌ Error (datos insuficientes, se necesitan al menos 3).")
+                continue
+
+            stat, p_value = stats.shapiro(datos)
+            
+            print(f"\nResultados para el grupo '{nombre_grupo}':")
+            print(f"  P-valor: {p_value:.4f}")
+            if p_value < alpha:
+                print("  Conclusión: -> ❌ (No normal)")
+            else:
+                print("  Conclusión: -> ✅ (Normal)")
