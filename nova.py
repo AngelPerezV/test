@@ -479,3 +479,31 @@ class AnalizadorEstadistico:
                 print("  Conclusión: -> ❌ (No normal)")
             else:
                 print("  Conclusión: -> ✅ (Normal)")
+
+
+
+# --- VISUALIZACIÓN INTEGRADA ---
+        print("\n--- Generando Visualización (Boxplot) ---")
+        plt.figure(figsize=(10, 7))
+        sns.boxplot(data=df_clean, x=var_grupo, y=var_dependiente)
+        plt.title(f'Distribución de {var_dependiente} por {var_grupo}')
+        plt.xlabel(var_grupo)
+        plt.ylabel(var_dependiente)
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+
+
+# --- MÉTODO POST-HOC ---
+    def realizar_prueba_tukey(self, var_dependiente, var_grupo, alpha=0.05):
+        """
+        Realiza la prueba Tukey HSD para comparaciones múltiples entre pares de grupos.
+        """
+        print(f"\n--- Ejecutando Prueba Post-Hoc (Tukey HSD) ---")
+        df_clean = self.df[[var_dependiente, var_grupo]].dropna()
+        tukey_result = pairwise_tukeyhsd(
+            endog=df_clean[var_dependiente],
+            groups=df_clean[var_grupo],
+            alpha=alpha
+        )
+        print(tukey_result)
+        return tukey_result
