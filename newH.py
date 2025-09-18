@@ -177,3 +177,163 @@ def _parse_date(date_input, formats_to_try):
             except ValueError:
                 continue
     return None
+
+
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
+import calendar
+import traceback
+import pyspark.sql.functions as F
+
+# --- Función Auxiliar para Parsear Fechas (sin cambios) ---
+def _parse_date(date_input, formats_to_try):
+    """Parsea una entrada de varios tipos (str, datetime, date) a un objeto date."""
+    if isinstance(date_input, date):
+        return date_input
+    if isinstance(date_input, datetime):
+        return date_input.date()
+    if isinstance(date_input, str):
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(date_input, fmt).date()
+            except ValueError:
+                continue
+    return None
+
+# --- Función Principal AJUSTADA ---
+def Historica(conex, fechas_iniciales, fechas_finales, diaria, mensual, campo_fecha_diaria, campo_fecha_mensual):
+    """
+    Gestiona la ingesta de datos históricos mensuales basándose en la fecha de negocio.
+
+    Args:
+        conex: Objeto de conexión a Spark.
+        fechas_iniciales (dict): Diccionario de fechas de inicio de los rangos.
+        fechas_finales (dict): Diccionario de fechas de fin de los rangos.
+        diaria (str): Nombre de la tabla diaria.
+        mensual (str): Nombre de la tabla mensual.
+        campo_fecha_diaria (str): Columna de fecha en la tabla DIARIA para filtrar.
+        campo_fecha_mensual (str): Columna de fecha en la tabla MENSUAL para verificar el máximo.
+    """
+    hoy = datetime.today().date()
+    formats_to_try = [
+        '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d',
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f'
+    ]
+
+    if not (7 <= hoy.day <= 15):
+        conex.write_log(f"No estás en rango de ejecución mensual (día {hoy.day}). Se ejecuta solo del día 7 al 15.", "INFO")
+        return
+
+    for i in range(2):
+        conex.write_log(f"Iniciando ciclo de verificación #{i+1} para la ingesta mensual.", "INFO")
+
+        # 1. Obtener la fecha MÁXIMA DE NEGOCIO ya procesada en la tabla mensual
+        max_processed_date = None
+        try:
+            # --- ¡CAMBIO CLAVE AQUÍ! ---
+            # Ahora usa el campo de fecha de negocio que le pasaste.
+            rangos_max = conex.spark.table(mensual).selectExpr(f"max({campo_fecha_mensual}) as max_date").collect()
+            if rangos_max and rangos_max[0] and rangos_max[0][0]:
+                r_max = rangos_max[0][0]
+                max_processed_date = _parse_date(r_max, formats_to_try)
+                if not max_processed_date:
+                    conex.write_log(f"La fecha máxima ('{r_max}') en '{campo_fecha_mensual}' no coincide con los formatos esperados.", "ERROR")
+                    raise ValueError(f"Formato de fecha de '{campo_fecha_mensual}' no reconocido: '{r_max}'")
+        except Exception as e:
+            conex.write_log(f"No se pudo obtener la fecha máxima de '{campo_fecha_mensual}'. Asumiendo tabla vacía. Error: {e}", "WARNING")
+            max_processed_date = None
+
+        # (El resto de la lógica para determinar el mes a procesar es la misma y ahora es más precisa)
+        month_to_process_start = None
+        if max_processed_date:
+            last_day_of_max_month = date(max_processed_date.year, max_processed_date.month,
+                                         calendar.monthrange(max_processed_date.year, max_processed_date.month)[1])
+            if max_processed_date >= last_day_of_max_month:
+                month_to_process_start = last_day_of_max_month + relativedelta(days=1)
+                conex.write_log(f"Mes {max_processed_date.strftime('%Y-%m')} completado según '{campo_fecha_mensual}'. Siguiente a considerar: {month_to_process_start.strftime('%Y-%m')}.", "INFO")
+            else:
+                month_to_process_start = date(max_processed_date.year, max_processed_date.month, 1)
+                conex.write_log(f"Mes {max_processed_date.strftime('%Y-%m')} incompleto según '{campo_fecha_mensual}'. Se procesará para completarlo.", "INFO")
+        else:
+            month_to_process_start = (hoy - relativedelta(months=2)).replace(day=1)
+            conex.write_log(f"Tabla mensual vacía o sin fecha válida en '{campo_fecha_mensual}'. Iniciando desde {month_to_process_start.strftime('%Y-%m')}.", "INFO")
+
+        if month_to_process_start.year == hoy.year and month_to_process_start.month == hoy.month:
+            conex.write_log(f"El mes a procesar ({month_to_process_start.strftime('%Y-%m')}) es el mes en curso. Proceso finalizado.", "INFO")
+            break
+        if month_to_process_start > hoy:
+            conex.write_log(f"El mes a procesar ({month_to_process_start.strftime('%Y-%m')}) es futuro. Proceso finalizado.", "INFO")
+            break
+
+        # (El resto de la función sigue igual)
+        found_range_to_process = False
+        sorted_initial_keys = sorted(fechas_iniciales.keys())
+        for initial_key in sorted_initial_keys:
+            expected_final_key = initial_key.replace('first', 'last')
+            if expected_final_key not in fechas_finales:
+                msg = f"La clave '{expected_final_key}' no se encontró en 'fechas_finales'."
+                conex.write_log(msg, "ERROR")
+                raise ValueError(msg)
+
+            start_date_candidate = _parse_date(fechas_iniciales[initial_key], formats_to_try)
+            end_date_candidate = _parse_date(fechas_finales[expected_final_key], formats_to_try)
+
+            if not start_date_candidate or not end_date_candidate:
+                msg = f"No se pudo parsear una de las fechas para las claves {initial_key}/{expected_final_key}."
+                conex.write_log(msg, "ERROR")
+                raise TypeError(msg)
+
+            if (start_date_candidate.month == month_to_process_start.month and
+                start_date_candidate.year == month_to_process_start.year):
+                
+                conex.write_log(f"Ejecutando ingesta para el rango: {start_date_candidate} a {end_date_candidate}", "INFO")
+                partition_value = start_date_candidate.strftime('%Y-%m')
+                # Pasamos 'campo_fecha_diaria' a la función de consulta
+                consulta_tablas(conex, start_date_candidate, end_date_candidate, diaria, mensual, campo_fecha_diaria, partition_value)
+                found_range_to_process = True
+                break
+        
+        if not found_range_to_process:
+            conex.write_log(f"No se encontró un rango de fechas para el mes {month_to_process_start.strftime('%Y-%m')}. Proceso finalizado.", "WARNING")
+            break
+
+# --- Función de Consulta (con parámetro renombrado para claridad) ---
+def consulta_tablas(conex, start_date, end_date, diaria, mensual, campo_fecha_diaria, partition_value):
+    # 'campoFecha' se renombra a 'campo_fecha_diaria' para ser más claro
+    conex.write_log(f"[consulta_tablas] Procesando desde {start_date} hasta {end_date} para la tabla [{mensual}]", "INFO")
+    
+    try:
+        tabla = conex.spark.table(diaria).where(F.col(campo_fecha_diaria).between(start_date, end_date))
+        tabla = tabla.withColumn("partition_month", F.lit(partition_value))
+
+        # (La lógica de cifras de control no cambia)
+        if "UNP" in mensual:
+            cifras_control = tabla.agg(
+                F.min("BusinessActivityDate").alias("min_acty_dt"),
+                F.max("BusinessActivityDate").alias("max_acty_dt"),
+                F.count("TotalPromisesNumber").alias("Registros")
+            )
+            conex.report_final([("Promesas no cumplidas M", cifras_control)])
+        elif "RAK" in mensual:
+            cifras_control = tabla.agg(
+                F.min("ProcessDate").alias("Fecha_minima"),
+                F.max("ProcessDate").alias("Fecha_maxima"),
+                F.count("EmployeeRankingNumber").alias("Registros")
+            )
+            conex.report_final([("Ranking M", cifras_control)])
+        else:
+             cifras_control = tabla.agg(
+                F.min("BusinessActivityDate").alias("min_acty_dt"),
+                F.max("BusinessActivityDate").alias("max_acty_dt"),
+                F.count("TotalPromisesNumber").alias("Registros")
+            )
+             conex.report_final([("Promesas cumplidas M", cifras_control)])
+
+        conex.write_log(f"Iniciando escritura en [{mensual}] para la partición [{partition_value}]...", "INFO")
+        conex.DLake_Replace(tabla, mensual, f"partition_month = '{partition_value}'")
+        conex.write_log(f"Escritura completada en [{mensual}] para la partición [{partition_value}].", "INFO")
+
+    except Exception as e:
+        error_msg = traceback.format_exc()
+        conex.write_log(f"Error en [consulta_tablas]: {error_msg}", "ERROR")
+        raise e
