@@ -162,3 +162,18 @@ def consulta_tablas(conex, start_date, end_date, diaria, mensual, campoFecha, pa
         conex.write_log(f"Error en [consulta_tablas]: {error_msg}", "ERROR")
         # SendErrorEmail(f"Error en el proceso de ingesta mensual: {e}") # Descomentar si se usa
         raise e # Relanzar la excepción para detener el proceso si es crítico
+
+
+def _parse_date(date_input, formats_to_try):
+    """Parsea una entrada de varios tipos (str, datetime, date) a un objeto date."""
+    if isinstance(date_input, date):
+        return date_input
+    if isinstance(date_input, datetime):
+        return date_input.date()
+    if isinstance(date_input, str):
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(date_input, fmt).date()
+            except ValueError:
+                continue
+    return None
